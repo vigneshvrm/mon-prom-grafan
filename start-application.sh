@@ -6,13 +6,131 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+VENV_PATH="${SCRIPT_DIR}/.venv"
+PYTHON_BIN="${VENV_PATH}/bin/python"
+PIP_BIN="${VENV_PATH}/bin/pip"
+REQUIRED_NODE_MAJOR=20
+
 echo "========================================="
 echo "  Node Exporter Installation System"
 echo "========================================="
 echo ""
 
-# Step 1: Check and install Podman if needed
-echo "[1/5] Checking Podman installation..."
+ensure_system_packages() {
+    if command -v apt-get &> /dev/null; then
+        local packages=(python3 python3-pip python3-venv sshpass npm curl)
+        local missing=()
+
+        for pkg in "${packages[@]}"; do
+            if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+                missing+=("$pkg")
+            fi
+        done
+
+        if [ ${#missing[@]} -gt 0 ]; then
+            echo "Installing system packages: ${missing[*]}"
+            sudo apt-get update
+            sudo apt-get install -y "${missing[@]}"
+        else
+            echo "✓ System packages already installed."
+        fi
+    else
+        echo "Warning: Unsupported package manager."
+        echo "Install manually: python3 python3-pip python3-venv sshpass curl npm"
+    fi
+}
+
+install_nodejs_20() {
+    if command -v apt-get &> /dev/null; then
+        echo "Installing Node.js 20.x from NodeSource..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+    else
+        echo "Warning: Automatic Node.js install only supported on apt-based systems."
+        echo "Please install Node.js 20.x manually from https://nodejs.org/"
+    fi
+}
+
+ensure_node_runtime() {
+    if command -v node &> /dev/null; then
+        local version major
+        version="$(node -v | sed 's/v//')"
+        major="${version%%.*}"
+        if [ "$major" -lt "$REQUIRED_NODE_MAJOR" ]; then
+            echo "Node.js $version detected (need >=${REQUIRED_NODE_MAJOR}). Upgrading..."
+            install_nodejs_20
+        else
+            echo "✓ Node.js $(node -v) detected."
+        fi
+    else
+        echo "Node.js not found. Installing..."
+        install_nodejs_20
+    fi
+}
+
+ensure_python_venv() {
+    if [ ! -d "$VENV_PATH" ]; then
+        echo "Creating Python virtual environment at ${VENV_PATH}..."
+        python3 -m venv "$VENV_PATH"
+    fi
+    if [ ! -x "$PYTHON_BIN" ]; then
+        echo "Error: virtual environment not created correctly."
+        exit 1
+    fi
+}
+
+install_python_dependencies() {
+    if [ ! -f "${SCRIPT_DIR}/requirements.txt" ]; then
+        echo "Warning: requirements.txt not found. Skipping Python dependencies."
+        return
+    fi
+
+    echo "Installing Python dependencies inside ${VENV_PATH}..."
+    "$PIP_BIN" install --upgrade pip setuptools wheel
+    "$PIP_BIN" install -r "${SCRIPT_DIR}/requirements.txt"
+}
+
+build_react_ui() {
+    cd "${SCRIPT_DIR}/web-ui"
+
+    if ! command -v npm &> /dev/null; then
+        echo "Warning: npm not found. React UI will not be built."
+        echo "Install Node.js 20+ to build the modern UI."
+        cd "$SCRIPT_DIR"
+        return
+    fi
+
+    if [ ! -d "node_modules" ]; then
+        echo "Installing Node.js dependencies..."
+        npm install || {
+            echo "Warning: npm install failed. Using fallback template."
+            cd "$SCRIPT_DIR"
+            return
+        }
+    fi
+
+    echo "Building React application..."
+    npm run build || {
+        echo "Warning: React build failed. The application will use fallback template."
+    }
+
+    cd "$SCRIPT_DIR"
+}
+
+# Step 1: Prepare base system dependencies
+echo "[1/7] Preparing base system dependencies..."
+ensure_system_packages
+ensure_python_venv
+ensure_node_runtime
+echo ""
+
+# Step 2: Install Python packages inside virtual environment
+echo "[2/7] Installing Python dependencies (isolated virtualenv)..."
+install_python_dependencies
+echo ""
+
+# Step 3: Check Podman installation
+echo "[3/7] Checking Podman installation..."
 if ! command -v podman &> /dev/null; then
     echo "Podman is not installed. Installing..."
     if [ -f "${SCRIPT_DIR}/scripts/install-podman.sh" ]; then
@@ -27,8 +145,8 @@ else
 fi
 echo ""
 
-# Step 2: Check Prometheus status and deploy if needed
-echo "[2/5] Checking Prometheus deployment..."
+# Step 4: Check Prometheus deployment
+echo "[4/7] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
     
@@ -58,77 +176,13 @@ else
 fi
 echo ""
 
-# Step 3: Install project dependencies
-echo "[3/5] Installing project dependencies..."
-
-APT_PACKAGES=(python3 python3-pip python3-venv sshpass curl)
-MISSING_APT=()
-
-for pkg in "${APT_PACKAGES[@]}"; do
-    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
-        MISSING_APT+=("$pkg")
-    fi
-done
-
-if [ ${#MISSING_APT[@]} -gt 0 ]; then
-    echo "Installing system packages: ${MISSING_APT[*]}"
-    sudo apt-get update
-    sudo apt-get install -y "${MISSING_APT[@]}"
-else
-    echo "✓ System packages already installed."
-fi
-
-export PATH="$HOME/.local/bin:$PATH"
-
-if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
-    echo "Installing Python dependencies..."
-    python3 -m pip install --upgrade pip setuptools wheel
-    
-    # Handle PyYAML separately (Ubuntu 20.04 ships PyYAML 5.3.1 via distutils)
-    # Use --ignore-installed to bypass distutils uninstall issue
-    echo "Installing PyYAML (ignoring system-installed version)..."
-    python3 -m pip install --ignore-installed PyYAML || {
-        echo "Warning: PyYAML installation failed. Continuing with system version..."
-    }
-    
-    # Install remaining requirements
-    echo "Installing other Python packages..."
-    python3 -m pip install -r "${SCRIPT_DIR}/requirements.txt" || {
-        echo "Warning: Some packages failed to install. Check errors above."
-    }
-else
-    echo "Warning: requirements.txt not found. Skipping Python dependencies."
-fi
+# Step 5: Build React UI
+echo "[5/7] Building React UI..."
+build_react_ui
 echo ""
 
-# Step 4: Build React UI (if Node.js is available)
-echo "[4/6] Building React UI..."
-cd "${SCRIPT_DIR}/web-ui"
-
-if command -v npm &> /dev/null; then
-    # Check if node_modules exists, if not install dependencies
-    if [ ! -d "node_modules" ]; then
-        echo "Installing Node.js dependencies..."
-        npm install
-    fi
-    
-    # Build React app
-    if [ -d "node_modules" ]; then
-        echo "Building React application..."
-        npm run build || {
-            echo "Warning: React build failed. The application will use fallback template."
-        }
-    fi
-else
-    echo "Warning: npm not found. React UI will not be built."
-    echo "Install Node.js to build the modern UI: sudo apt install nodejs npm"
-fi
-
-cd "${SCRIPT_DIR}"
-echo ""
-
-# Step 5: Verify installation scripts are available
-echo "[5/6] Verifying installation scripts..."
+# Step 6: Verify installation scripts are available
+echo "[6/7] Verifying installation scripts..."
 INSTALL_SCRIPTS=(
     "install-podman.sh"
     "install-prometheus.sh"
@@ -146,36 +200,8 @@ for script in "${INSTALL_SCRIPTS[@]}"; do
 done
 echo ""
 
-# Step 5: Build React UI
-echo "[5/6] Building React UI..."
-cd "${SCRIPT_DIR}/web-ui"
-
-# Check if node_modules exists, if not install dependencies
-if [ ! -d "node_modules" ]; then
-    echo "Installing Node.js dependencies..."
-    if command -v npm &> /dev/null; then
-        npm install
-    else
-        echo "Warning: npm not found. React UI will not be built."
-        echo "Install Node.js and npm to build the UI, or use the old template."
-    fi
-fi
-
-# Build React app if npm is available
-if command -v npm &> /dev/null && [ -d "node_modules" ]; then
-    echo "Building React application..."
-    npm run build || {
-        echo "Warning: React build failed. The application will use fallback template."
-    }
-else
-    echo "Warning: Skipping React build. Using fallback template."
-fi
-
-cd "${SCRIPT_DIR}"
-echo ""
-
-# Step 6: Start Web UI
-echo "[6/6] Starting Web UI..."
+# Step 7: Start Web UI
+echo "[7/7] Starting Web UI..."
 echo ""
 
 # Create necessary directories
@@ -201,4 +227,4 @@ echo "Press Ctrl+C to stop"
 echo ""
 
 cd "${SCRIPT_DIR}/web-ui"
-python3 app.py
+"${PYTHON_BIN}" app.py

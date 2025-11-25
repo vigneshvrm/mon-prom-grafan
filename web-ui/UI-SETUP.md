@@ -19,7 +19,7 @@ web-ui/
 
 ### Automatic Build (Recommended)
 
-The `start-application.sh` script automatically builds the React UI:
+The `start-application.sh` script automatically builds the React UI (and installs Node.js 20.x if needed):
 
 ```bash
 ./start-application.sh
@@ -33,7 +33,7 @@ This will:
 
 ### Manual Build
 
-If you want to build manually:
+If you want to build manually (Node.js **20+** required):
 
 ```bash
 cd web-ui
@@ -46,6 +46,12 @@ npm run build
 
 # The build output will be in web-ui/static/
 ```
+
+> **Need Node.js 20?** On Debian/Ubuntu run:
+> ```
+> curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+> sudo apt-get install -y nodejs
+> ```
 
 ### Development Mode
 
@@ -88,9 +94,10 @@ This starts Vite dev server on port 3000 with proxy to Flask API on port 5000.
 ### Build Fails
 
 If `npm run build` fails:
-1. Check Node.js version: `node --version` (should be 16+)
+1. Check Node.js version: `node --version` (must be **>=20**)
 2. Delete `node_modules` and `package-lock.json`, then `npm install` again
-3. Check for TypeScript errors: `npm run build` will show them
+3. Ensure dependencies finished installing (no `npm ERR!` in logs)
+4. Check for TypeScript errors: `npm run build` will show them
 
 ### UI Not Loading
 

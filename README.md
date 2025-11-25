@@ -24,12 +24,13 @@ Automated Node Exporter installation with Prometheus integration using Ansible a
 ### Start the Complete Application
 
 The application will automatically:
-1. Install system dependencies (Python, pip, sshpass, curl)
-2. Install Python packages from requirements.txt
-3. Check and install Podman if needed
-4. Start Prometheus in a Podman container (if not running)
-5. Build React UI (if Node.js is available)
-6. Launch the web UI
+1. Install base packages (python3, pip, venv, sshpass, curl, npm) on Debian/Ubuntu
+2. Create an isolated `.venv/` and install Python dependencies safely (no system package conflicts)
+3. Ensure Node.js 20.x + npm are installed (via NodeSource) for the React UI build
+4. Check and install Podman if needed
+5. Start Prometheus in a Podman container (if not running)
+6. Build the React UI (falls back to classic template if build fails)
+7. Launch the Flask web application
 
 ```bash
 cd Monitoring
@@ -44,40 +45,47 @@ Access:
 
 `start-application.sh` installs all required dependencies automatically:
 
-- **System packages**: `python3`, `python3-pip`, `python3-venv`, `sshpass`, `curl`
-- **Python packages**: everything in `requirements.txt` (Flask, Ansible, PyYAML, bcrypt, pywinrm, etc.)
-- **Node.js packages**: Automatically installed and built if Node.js/npm is available
+- **System packages** (Debian/Ubuntu): `python3`, `python3-pip`, `python3-venv`, `sshpass`, `npm`, `curl`
+- **Python packages**: Installed inside `.venv/` so system packages (PyYAML, blinker, etc.) remain untouched
+- **Node.js runtime**: Ensures Node.js **20.x** + npm via NodeSource (required by Vite/React Router 7)
+- **Node.js packages**: Runs `npm install && npm run build` automatically (falls back gracefully if build fails)
 
 ### Optional: Node.js for Modern UI
 
-The React UI is automatically built if Node.js is installed. If not available, Flask will serve a fallback template.
+The React UI requires **Node.js 20+**. The startup script installs it automatically on apt-based systems. If you need to install manually:
 
-To enable the modern React UI:
 ```bash
 # Ubuntu/Debian
-sudo apt install nodejs npm
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-# Or install from nodejs.org for latest version
+# Other platforms
+# Download installer from https://nodejs.org/en/download/prebuilt-installer
 ```
 
 If you run scripts manually, ensure these are installed first:
 
 ```bash
-# System packages
-sudo apt-get install -y python3 python3-pip python3-venv sshpass curl
+# System packages (Debian/Ubuntu)
+sudo apt-get install -y python3 python3-pip python3-venv sshpass npm curl
 
-# Python packages (handles PyYAML distutils issue on Ubuntu 20.04)
-python3 -m pip install --upgrade pip setuptools wheel
-python3 -m pip install --ignore-installed PyYAML  # Bypass system PyYAML 5.3.1
-python3 -m pip install -r requirements.txt
+# Python virtual environment (avoids distutils conflicts)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
 
-# Node.js packages (optional, for React UI)
+# Node.js 20.x (required for Vite / React Router 7)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# React build (optional – only needed for manual builds)
 cd web-ui
 npm install
 npm run build
 ```
 
-**Note**: On Ubuntu 20.04, PyYAML 5.3.1 is installed via distutils and cannot be uninstalled by pip. The script uses `--ignore-installed` to install a newer version without removing the system package.
+**Note**: The virtual environment keeps system packages (PyYAML 5.3.1, blinker 1.4, etc.) untouched and prevents `uninstall-distutils-installed-package` errors. Deactivate with `deactivate` when finished.
 
 ## Manual Start (if needed)
 
@@ -239,26 +247,41 @@ If the modern UI doesn't appear:
 3. Check browser console for errors
 4. Flask will fallback to template if React build doesn't exist
 
-### PyYAML Installation Error
+### Python Packages Complain About distutils (PyYAML, blinker, click, etc.)
 
-If you see "Cannot uninstall PyYAML 5.3.1" error (Ubuntu 20.04):
+Ubuntu ships several Python libs via `distutils`, which pip refuses to uninstall. The fix is to use a virtual environment:
+
 ```bash
-# This is handled automatically by start-application.sh
-# If installing manually, use:
-python3 -m pip install --upgrade pip setuptools wheel
-python3 -m pip install --ignore-installed PyYAML
-python3 -m pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
 ```
 
-The `--ignore-installed` flag bypasses the distutils uninstall issue.
+The startup script now creates `.venv/` automatically, so you should only see this if running manual commands.
 
 ### Node.js Build Fails
 
 If `npm run build` fails:
-1. Check Node.js version: `node --version` (should be 16+)
-2. Delete `node_modules` and rebuild: `rm -rf node_modules package-lock.json && npm install`
-3. Check TypeScript errors in build output
-4. The app will still work with fallback template
+1. Check Node.js version: `node --version` (must be **>=20** for React Router 7 + Vite 6)
+2. Remove old dependencies: `rm -rf node_modules package-lock.json`
+3. Re-install: `npm install`
+4. Rebuild: `npm run build`
+5. If it still fails, capture the error log in `web-ui` and verify TypeScript errors
+6. The app will still work with fallback template even if the React build fails
+
+### Node.js / npm Too Old
+
+Errors such as `Unsupported engine for react-router-dom@7.9.6` or `esbuild postinstall` mean Node 10/12 is still active. Install Node.js 20+:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v   # should show v20.x.y
+npm -v    # npm 10+
+```
+
+After upgrading, delete `node_modules` and run `npm install` again.
 
 ### Podman Installation Fails
 
@@ -297,8 +320,8 @@ If port 5000 is in use:
 - **SSH/WinRM access**: To target servers
 
 ### Optional (for Modern UI)
-- **Node.js 16+**: For building React UI
-- **npm**: Comes with Node.js
+- **Node.js 20+**: Required for Vite 6 / React Router 7 build
+- **npm 10+**: Installed automatically with Node.js 20
 
 The application works without Node.js (uses fallback template), but the modern React UI provides a much better experience.
 
