@@ -1,7 +1,8 @@
 #!/bin/bash
 # Start the complete application (Podman check, Prometheus, Web UI)
 
-set -e
+# Don't exit on error - we handle errors explicitly
+set +e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
@@ -158,31 +159,40 @@ echo ""
 # Step 4: Check Prometheus deployment
 echo "[4/7] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
-    PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "$PROM_STATUS" ]; then
-        PROM_STATUS="not_running"
-    else
-        # Use only the last line, trim whitespace
-        PROM_STATUS=$(echo "$PROM_STATUS" | tail -n 1 | tr -d '\r')
-    fi
+    # Run check script - it exits with 1 if not running, which is expected
+    # Use || true to prevent set -e from exiting
+    PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
     
-    if [ "$PROM_STATUS" = "not_running" ]; then
+    # Clean up the status string
+    PROM_STATUS=$(echo "$PROM_STATUS" | tail -n 1 | tr -d '\r\n' | xargs)
+    
+    if [ -z "$PROM_STATUS" ] || [ "$PROM_STATUS" = "not_running" ]; then
+        PROM_STATUS="not_running"
         echo "Prometheus is not running. Deploying Prometheus..."
         if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
-            bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start || {
-                echo "Warning: Failed to deploy Prometheus. This may be because:"
+            # Temporarily disable exit on error for this command
+            set +e
+            bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
+            INSTALL_EXIT=$?
+            set -e
+            
+            if [ $INSTALL_EXIT -ne 0 ]; then
+                echo "Warning: Prometheus deployment returned exit code $INSTALL_EXIT"
+                echo "This may be because:"
                 echo "  - Prometheus is already installed as a systemd service"
                 echo "  - Prometheus container is already running"
                 echo "  - Installation failed (check logs above)"
                 echo ""
-                echo "You can check status with:"
+                echo "Continuing anyway - you can check status with:"
                 echo "  bash ${SCRIPT_DIR}/scripts/check-prometheus-service.sh"
                 echo "Or deploy manually with:"
                 echo "  bash ${SCRIPT_DIR}/scripts/install-prometheus.sh start"
-            }
+            else
+                echo "✓ Prometheus deployment completed"
+            fi
         else
             echo "Error: install-prometheus.sh not found"
-            exit 1
+            echo "Continuing without Prometheus deployment..."
         fi
     else
         echo "✓ Prometheus is already running (${PROM_STATUS})"
