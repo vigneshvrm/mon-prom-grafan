@@ -66,8 +66,9 @@ If you run scripts manually, ensure these are installed first:
 # System packages
 sudo apt-get install -y python3 python3-pip python3-venv sshpass curl
 
-# Python packages
-python3 -m pip install --upgrade pip
+# Python packages (handles PyYAML distutils issue on Ubuntu 20.04)
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install --ignore-installed PyYAML  # Bypass system PyYAML 5.3.1
 python3 -m pip install -r requirements.txt
 
 # Node.js packages (optional, for React UI)
@@ -75,6 +76,8 @@ cd web-ui
 npm install
 npm run build
 ```
+
+**Note**: On Ubuntu 20.04, PyYAML 5.3.1 is installed via distutils and cannot be uninstalled by pip. The script uses `--ignore-installed` to install a newer version without removing the system package.
 
 ## Manual Start (if needed)
 
@@ -235,6 +238,19 @@ If the modern UI doesn't appear:
 2. If missing, build manually: `cd web-ui && npm install && npm run build`
 3. Check browser console for errors
 4. Flask will fallback to template if React build doesn't exist
+
+### PyYAML Installation Error
+
+If you see "Cannot uninstall PyYAML 5.3.1" error (Ubuntu 20.04):
+```bash
+# This is handled automatically by start-application.sh
+# If installing manually, use:
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install --ignore-installed PyYAML
+python3 -m pip install -r requirements.txt
+```
+
+The `--ignore-installed` flag bypasses the distutils uninstall issue.
 
 ### Node.js Build Fails
 

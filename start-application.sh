@@ -82,8 +82,20 @@ export PATH="$HOME/.local/bin:$PATH"
 
 if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
     echo "Installing Python dependencies..."
-    python3 -m pip install --upgrade pip
-    python3 -m pip install -r "${SCRIPT_DIR}/requirements.txt"
+    python3 -m pip install --upgrade pip setuptools wheel
+    
+    # Handle PyYAML separately (Ubuntu 20.04 ships PyYAML 5.3.1 via distutils)
+    # Use --ignore-installed to bypass distutils uninstall issue
+    echo "Installing PyYAML (ignoring system-installed version)..."
+    python3 -m pip install --ignore-installed PyYAML || {
+        echo "Warning: PyYAML installation failed. Continuing with system version..."
+    }
+    
+    # Install remaining requirements
+    echo "Installing other Python packages..."
+    python3 -m pip install -r "${SCRIPT_DIR}/requirements.txt" || {
+        echo "Warning: Some packages failed to install. Check errors above."
+    }
 else
     echo "Warning: requirements.txt not found. Skipping Python dependencies."
 fi
