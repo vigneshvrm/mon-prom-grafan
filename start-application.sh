@@ -148,7 +148,13 @@ echo ""
 # Step 4: Check Prometheus deployment
 echo "[4/7] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
-    PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
+    PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$PROM_STATUS" ]; then
+        PROM_STATUS="not_running"
+    else
+        # Use only the last line, trim whitespace
+        PROM_STATUS=$(echo "$PROM_STATUS" | tail -n 1 | tr -d '\r')
+    fi
     
     if [ "$PROM_STATUS" = "not_running" ]; then
         echo "Prometheus is not running. Deploying Prometheus..."
