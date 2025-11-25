@@ -18,6 +18,16 @@ echo ""
 
 ensure_system_packages() {
     if command -v apt-get &> /dev/null; then
+        # Prevent interactive prompts during package installation
+        if ! command -v debconf-set-selections &> /dev/null; then
+            echo "Installing debconf-utils to prevent interactive prompts..."
+            sudo apt-get update
+            sudo apt-get install -y debconf-utils
+        fi
+        
+        # Configure debconf to avoid hanging on service restart prompts
+        echo "* libraries/restart-without-asking boolean true" | sudo debconf-set-selections
+        
         local packages=(python3 python3-pip python3-venv sshpass npm curl)
         local missing=()
 
