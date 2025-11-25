@@ -12,13 +12,13 @@ echo "========================================="
 echo ""
 
 # Step 1: Check and install Podman if needed
-echo "[1/3] Checking Podman installation..."
+echo "[1/4] Checking Podman installation..."
 if ! command -v podman &> /dev/null; then
-    echo "Podman is not installed. Attempting to install..."
-    if [ -f "${SCRIPT_DIR}/scripts/check-podman.sh" ]; then
-        bash "${SCRIPT_DIR}/scripts/check-podman.sh"
+    echo "Podman is not installed. Installing..."
+    if [ -f "${SCRIPT_DIR}/scripts/install-podman.sh" ]; then
+        bash "${SCRIPT_DIR}/scripts/install-podman.sh"
     else
-        echo "Error: check-podman.sh not found"
+        echo "Error: install-podman.sh not found"
         exit 1
     fi
 else
@@ -27,40 +27,58 @@ else
 fi
 echo ""
 
-# Step 2: Check Prometheus status and start if needed
-echo "[2/3] Checking Prometheus status..."
+# Step 2: Check Prometheus status and deploy if needed
+echo "[2/4] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
     
     if [ "$PROM_STATUS" = "not_running" ]; then
-        echo "Prometheus is not running. Attempting to start Prometheus container..."
-        echo "Note: This will check for existing installations first."
-        if [ -f "${SCRIPT_DIR}/scripts/setup-prometheus.sh" ]; then
-            bash "${SCRIPT_DIR}/scripts/setup-prometheus.sh" start || {
-                echo "Warning: Failed to start Prometheus container. This may be because:"
+        echo "Prometheus is not running. Deploying Prometheus..."
+        if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
+            bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start || {
+                echo "Warning: Failed to deploy Prometheus. This may be because:"
                 echo "  - Prometheus is already installed as a systemd service"
                 echo "  - Prometheus container is already running"
                 echo "  - Installation failed (check logs above)"
                 echo ""
                 echo "You can check status with:"
                 echo "  bash ${SCRIPT_DIR}/scripts/check-prometheus-service.sh"
-                echo "Or start manually with:"
-                echo "  bash ${SCRIPT_DIR}/scripts/setup-prometheus.sh start"
+                echo "Or deploy manually with:"
+                echo "  bash ${SCRIPT_DIR}/scripts/install-prometheus.sh start"
             }
         else
-            echo "Warning: setup-prometheus.sh not found. Skipping Prometheus setup."
+            echo "Error: install-prometheus.sh not found"
+            exit 1
         fi
     else
         echo "✓ Prometheus is already running (${PROM_STATUS})"
-        echo "  No installation needed."
     fi
 else
     echo "Warning: check-prometheus-service.sh not found. Skipping Prometheus check."
 fi
 echo ""
 
-# Step 3: Start Web UI
-echo "[3/3] Starting Web UI..."
+# Step 3: Verify installation scripts are available
+echo "[3/4] Verifying installation scripts..."
+INSTALL_SCRIPTS=(
+    "install-podman.sh"
+    "install-prometheus.sh"
+    "install-linux-node-exporter.sh"
+    "install-windows-node-exporter.sh"
+)
+
+for script in "${INSTALL_SCRIPTS[@]}"; do
+    if [ -f "${SCRIPT_DIR}/scripts/${script}" ]; then
+        chmod +x "${SCRIPT_DIR}/scripts/${script}"
+        echo "✓ ${script}"
+    else
+        echo "✗ ${script} not found"
+    fi
+done
+echo ""
+
+# Step 4: Start Web UI
+echo "[4/4] Starting Web UI..."
 echo ""
 
 # Create necessary directories

@@ -12,9 +12,41 @@ check_podman() {
 }
 
 install_podman_ubuntu() {
-    echo "Installing Podman on Ubuntu/Debian..."
-    sudo apt-get update
-    sudo apt-get install -y podman
+    echo "Installing Podman on Ubuntu..."
+    
+    # Detect Ubuntu version
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        UBUNTU_VERSION="$VERSION_ID"
+    else
+        echo "Error: Cannot detect Ubuntu version"
+        exit 1
+    fi
+    
+    echo "Detected Ubuntu version: $UBUNTU_VERSION"
+    
+    # Step 1: Install curl if not available
+    if ! command -v curl &> /dev/null; then
+        echo "Installing curl..."
+        sudo apt-get update
+        sudo apt-get install -y curl ca-certificates
+    fi
+    
+    # Step 2: Add Podman repository (method that works perfectly)
+    echo "Adding Podman repository..."
+    echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/ /" | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+    
+    # Step 3: Add GPG key (method that works perfectly)
+    echo "Adding GPG key..."
+    curl -L "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/Release.key" | sudo apt-key add -
+    
+    # Step 4: Update apt cache
+    echo "Updating apt cache..."
+    sudo apt update
+    
+    # Step 5: Install Podman
+    echo "Installing Podman..."
+    sudo apt install -y podman
 }
 
 install_podman_centos() {

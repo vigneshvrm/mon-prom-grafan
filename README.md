@@ -84,10 +84,12 @@ Monitoring/
 │   ├── main.yml           # Main orchestration
 │   ├── linux-node-exporter.yml
 │   └── windows-node-exporter.yml
-├── scripts/               # Helper scripts
-│   ├── check-podman.sh   # Check/install Podman
-│   ├── setup-prometheus.sh  # Setup Prometheus container
-│   └── check-prometheus-service.sh
+├── scripts/               # Installation scripts
+│   ├── install-podman.sh              # 1. Podman installation
+│   ├── install-prometheus.sh          # 2. Prometheus deployment
+│   ├── install-linux-node-exporter.sh # 3. Linux Node Exporter
+│   ├── install-windows-node-exporter.sh # 4. Windows Node Exporter
+│   └── check-prometheus-service.sh    # Helper: Check Prometheus status
 ├── web-ui/                # Web frontend
 │   ├── app.py            # Flask application
 │   └── templates/
@@ -99,22 +101,38 @@ Monitoring/
 └── start-application.sh   # Main startup script
 ```
 
-## Prometheus Container Management
+## Installation Scripts
 
-The Prometheus server runs in a Podman container:
-
+### 1. Install Podman
 ```bash
-# Check status
-bash scripts/setup-prometheus.sh status
+./scripts/install-podman.sh
+```
 
-# Start container
-bash scripts/setup-prometheus.sh start
+### 2. Deploy Prometheus
+```bash
+# Start/Deploy
+./scripts/install-prometheus.sh start
+
+# Check status
+bash scripts/check-prometheus-service.sh
 
 # Stop container
-bash scripts/setup-prometheus.sh stop
+podman stop prometheus
 
 # Restart container
-bash scripts/setup-prometheus.sh restart
+podman restart prometheus
+```
+
+### 3. Install Linux Node Exporter
+```bash
+./scripts/install-linux-node-exporter.sh <host> <username> <password> [port]
+# Example: ./scripts/install-linux-node-exporter.sh 192.168.1.10 admin mypass 9100
+```
+
+### 4. Install Windows Node Exporter
+```bash
+./scripts/install-windows-node-exporter.sh <host> <username> <password> [port]
+# Example: ./scripts/install-windows-node-exporter.sh 192.168.1.10 Administrator mypass 9100
 ```
 
 ## Configuration
@@ -152,7 +170,7 @@ podman logs prometheus
 
 If port 9090 is already in use:
 - Stop existing Prometheus: `podman stop prometheus` or `systemctl stop prometheus`
-- Or change port in `scripts/setup-prometheus.sh`
+- Or edit `scripts/install-prometheus.sh` to change the port
 
 ## Requirements
 

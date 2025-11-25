@@ -55,44 +55,42 @@
       when: podman_check.rc == 0
 
     # Ubuntu/Debian Installation
-    - name: Update apt cache (Ubuntu/Debian)
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
-      when: is_debian_based and podman_check.rc != 0
-
+    # Step 1: Install required packages first (curl needed for GPG key)
     - name: Install required packages for Podman (Ubuntu/Debian)
       apt:
         name:
-          - apt-transport-https
-          - ca-certificates
           - curl
-          - gnupg
-          - lsb-release
+          - ca-certificates
         state: present
+        update_cache: yes
       when: is_debian_based and podman_check.rc != 0
+      become: true
 
+    # Step 2: Add Podman repository (Ubuntu) - MUST BE DONE BEFORE apt update
     - name: Add Podman repository (Ubuntu) - Method that works perfectly
       shell: |
         echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/ /" | tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
-      args:
-        creates: /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
       when: is_debian_based and is_ubuntu and podman_check.rc != 0
       become: true
+      changed_when: true
+      register: repo_added
 
+    # Step 3: Add Podman repository GPG key (Ubuntu) - MUST BE DONE BEFORE apt update
     - name: Add Podman repository GPG key (Ubuntu) - Method that works perfectly
       shell: |
         curl -L "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/Release.key" | apt-key add -
       when: is_debian_based and is_ubuntu and podman_check.rc != 0
       become: true
+      register: gpg_key_added
 
+    # Step 4: Update apt cache AFTER adding repository and GPG key (CRITICAL - must happen after repo is added)
     - name: Update apt cache after adding Podman repository (Ubuntu)
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+      shell: apt update
       when: is_debian_based and is_ubuntu and podman_check.rc != 0
       become: true
+      changed_when: true
 
+    # Step 5: Install Podman (Ubuntu) - Now the package will be found
     - name: Install Podman (Ubuntu) - Method that works perfectly
       apt:
         name:
