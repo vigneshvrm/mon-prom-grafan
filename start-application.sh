@@ -98,7 +98,39 @@ install_python_dependencies() {
 
     echo "Installing Python dependencies inside ${VENV_PATH}..."
     "$PIP_BIN" install --upgrade pip setuptools wheel
-    "$PIP_BIN" install -r "${SCRIPT_DIR}/requirements.txt"
+    
+    # Install remaining requirements (includes ansible)
+    "$PIP_BIN" install -r "${SCRIPT_DIR}/requirements.txt" || {
+        echo "Warning: Some packages failed to install. Check errors above."
+    }
+    
+    # Verify Ansible is installed
+    if [ ! -f "${VENV_PATH}/bin/ansible-playbook" ]; then
+        echo "Warning: ansible-playbook not found in virtual environment."
+        echo "Attempting to install Ansible explicitly..."
+        "$PIP_BIN" install ansible ansible-core || {
+            echo "Error: Failed to install Ansible."
+            exit 1
+        }
+    fi
+    
+    # Verify installation
+    if [ -f "${VENV_PATH}/bin/ansible-playbook" ]; then
+        ANSIBLE_VERSION=$("${VENV_PATH}/bin/ansible-playbook" --version 2>/dev/null | head -n 1)
+        echo "✓ Ansible installed: ${ANSIBLE_VERSION}"
+    else
+        echo "Error: Failed to install Ansible. Please install manually:"
+        echo "  ${PIP_BIN} install ansible ansible-core"
+        exit 1
+    fi
+    
+    # Verify ansible-playbook is available
+    if ! "$VENV_PATH/bin/ansible-playbook" --version &>/dev/null; then
+        echo "Warning: ansible-playbook not found after installation."
+        echo "You may need to install Ansible manually: $PIP_BIN install ansible"
+    else
+        echo "✓ Ansible installed successfully"
+    fi
 }
 
 build_react_ui() {

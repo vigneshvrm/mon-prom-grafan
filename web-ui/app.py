@@ -134,15 +134,19 @@ def create_dynamic_inventory(target_host, target_username, target_password, os_t
     """Create a temporary inventory file for a single host"""
     import tempfile
     
-    # Determine connection type based on OS
-    os_type = os_type.lower()
+    # Determine connection type based on OS (normalize to lowercase)
+    os_type = os_type.lower() if os_type else 'linux'
+    
     if os_type == 'windows':
+        # Windows uses WinRM on port 5985 (HTTP) or 5986 (HTTPS)
+        # Use port 5985 for basic auth (simpler setup)
+        # Extended timeouts for WinRM operations
         inventory_content = f"""[windows]
-{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_connection=winrm ansible_port=5985 ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore ansible_become=false
+{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_connection=winrm ansible_port=5985 ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore ansible_become=false ansible_winrm_read_timeout_sec=60 ansible_winrm_operation_timeout_sec=60 ansible_winrm_connection_timeout=30
 """
     else:  # linux or auto (default to linux)
         inventory_content = f"""[linux]
-{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_become=true ansible_become_pass={target_password} ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_become=true ansible_become_pass={target_password} ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 """
     
     # Create temporary inventory file
@@ -208,9 +212,47 @@ operation_timeout_sec = 10
         with open(ansible_cfg_path, 'w') as f:
             f.write(ansible_cfg_content)
         
+        # Find ansible-playbook command - prioritize virtual environment
+        ansible_playbook_cmd = None
+        
+        # Check in virtual environment first (required)
+        venv_path = os.path.join(monitoring_dir, '.venv')
+        venv_ansible = os.path.join(venv_path, 'bin', 'ansible-playbook')
+        if os.path.exists(venv_ansible):
+            ansible_playbook_cmd = venv_ansible
+            print(f"Using Ansible from virtual environment: {ansible_playbook_cmd}")
+        else:
+            # Fallback to system-wide
+            import shutil
+            ansible_playbook_cmd = shutil.which('ansible-playbook')
+            if ansible_playbook_cmd:
+                print(f"Using system Ansible: {ansible_playbook_cmd}")
+        
+        # If still not found, try common paths
+        if not ansible_playbook_cmd:
+            common_paths = [
+                '/usr/local/bin/ansible-playbook',
+                '/usr/bin/ansible-playbook',
+                '/opt/homebrew/bin/ansible-playbook',
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    ansible_playbook_cmd = path
+                    print(f"Using Ansible from: {ansible_playbook_cmd}")
+                    break
+        
+        if not ansible_playbook_cmd:
+            raise Exception(
+                'ansible-playbook not found. Please run ./start-application.sh to install dependencies.\n'
+                'Or install manually:\n'
+                '  cd ' + monitoring_dir + '\n'
+                '  source .venv/bin/activate\n'
+                '  pip install ansible ansible-core'
+            )
+        
         # Run ansible-playbook with aggressive timeout settings
         cmd = [
-            'ansible-playbook',
+            ansible_playbook_cmd,
             '-i', inventory_path,
             playbook_path,
             '-e', f'@{extra_vars_file}',

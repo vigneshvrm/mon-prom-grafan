@@ -1,0 +1,77 @@
+---
+- name: Configure WinRM for Ansible
+  hosts: windows
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: Check if WinRM is already configured
+      win_shell: |
+        $winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+        if ($winrm -and $winrm.Status -eq 'Running') {
+          $listener = Get-WSManInstance -ResourceURI winrm/config/Listener -Enumerate -ErrorAction SilentlyContinue
+          if ($listener) {
+            Write-Output "configured"
+          } else {
+            Write-Output "not_configured"
+          }
+        } else {
+          Write-Output "not_running"
+        }
+      register: winrm_status
+      changed_when: false
+
+    - name: Enable WinRM service
+      win_service:
+        name: WinRM
+        start_mode: auto
+        state: started
+      when: winrm_status.stdout != "configured"
+
+    - name: Configure WinRM for HTTP (Basic Auth)
+      win_shell: |
+        # Remove existing HTTP listener if any
+        Remove-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address="*";Transport="HTTP"} -ErrorAction SilentlyContinue
+        
+        # Create new HTTP listener
+        New-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address="*";Transport="HTTP"} -ValueSet @{Hostname="*"}
+        
+        # Configure WinRM service
+        Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true
+        Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true
+        
+        # Configure WinRM client
+        Set-Item WSMan:\localhost\Client\Auth\Basic -Value $true
+        Set-Item WSMan:\localhost\Client\AllowUnencrypted -Value $true
+        
+        # Restart WinRM service
+        Restart-Service WinRM -Force
+        
+        Write-Output "WinRM configured successfully"
+      when: winrm_status.stdout != "configured"
+      register: winrm_config_result
+
+    - name: Configure Windows Firewall for WinRM
+      win_firewall_rule:
+        name: "WinRM HTTP"
+        localport: 5985
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+      when: winrm_status.stdout != "configured"
+
+    - name: Verify WinRM is accessible
+      win_wait_for:
+        port: 5985
+        timeout: 30
+        delay: 5
+      when: winrm_status.stdout != "configured"
+
+    - name: Display WinRM status
+      debug:
+        msg:
+          - "WinRM Status: {{ winrm_status.stdout }}"
+          - "WinRM is configured and ready for Ansible connections"
+

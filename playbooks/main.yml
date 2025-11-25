@@ -2,6 +2,28 @@
 # Main orchestration playbook
 # Routes to appropriate installation playbook based on OS
 
-- import_playbook: linux-node-exporter.yml
+- name: Route to Linux or Windows installation
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Determine target OS
+      set_fact:
+        target_os_determined: "{{ target_os | default('linux') | lower }}"
+      when: target_os is defined
+    
+    - name: Set default OS to linux if not specified
+      set_fact:
+        target_os_determined: "linux"
+      when: target_os is not defined
 
-- import_playbook: windows-node-exporter.yml
+- name: Install Node Exporter on Linux
+  import_playbook: linux-node-exporter.yml
+  when: target_os_determined | default('linux') | lower != 'windows'
+
+- name: Configure WinRM for Windows (must run before Windows Exporter)
+  import_playbook: configure-winrm.yml
+  when: target_os_determined | default('linux') | lower == 'windows'
+
+- name: Install Windows Exporter
+  import_playbook: windows-node-exporter.yml
+  when: target_os_determined | default('linux') | lower == 'windows'
