@@ -12,7 +12,7 @@ echo "========================================="
 echo ""
 
 # Step 1: Check and install Podman if needed
-echo "[1/4] Checking Podman installation..."
+echo "[1/5] Checking Podman installation..."
 if ! command -v podman &> /dev/null; then
     echo "Podman is not installed. Installing..."
     if [ -f "${SCRIPT_DIR}/scripts/install-podman.sh" ]; then
@@ -28,7 +28,7 @@ fi
 echo ""
 
 # Step 2: Check Prometheus status and deploy if needed
-echo "[2/4] Checking Prometheus deployment..."
+echo "[2/5] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
     
@@ -58,8 +58,39 @@ else
 fi
 echo ""
 
-# Step 3: Verify installation scripts are available
-echo "[3/4] Verifying installation scripts..."
+# Step 3: Install project dependencies
+echo "[3/5] Installing project dependencies..."
+
+APT_PACKAGES=(python3 python3-pip python3-venv sshpass curl)
+MISSING_APT=()
+
+for pkg in "${APT_PACKAGES[@]}"; do
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        MISSING_APT+=("$pkg")
+    fi
+done
+
+if [ ${#MISSING_APT[@]} -gt 0 ]; then
+    echo "Installing system packages: ${MISSING_APT[*]}"
+    sudo apt-get update
+    sudo apt-get install -y "${MISSING_APT[@]}"
+else
+    echo "✓ System packages already installed."
+fi
+
+export PATH="$HOME/.local/bin:$PATH"
+
+if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
+    echo "Installing Python dependencies..."
+    python3 -m pip install --upgrade pip
+    python3 -m pip install -r "${SCRIPT_DIR}/requirements.txt"
+else
+    echo "Warning: requirements.txt not found. Skipping Python dependencies."
+fi
+echo ""
+
+# Step 4: Verify installation scripts are available
+echo "[4/5] Verifying installation scripts..."
 INSTALL_SCRIPTS=(
     "install-podman.sh"
     "install-prometheus.sh"
@@ -77,8 +108,8 @@ for script in "${INSTALL_SCRIPTS[@]}"; do
 done
 echo ""
 
-# Step 4: Start Web UI
-echo "[4/4] Starting Web UI..."
+# Step 5: Start Web UI
+echo "[5/5] Starting Web UI..."
 echo ""
 
 # Create necessary directories
@@ -91,12 +122,6 @@ if [ ! -d "/etc/prometheus" ]; then
     echo "Creating /etc/prometheus directory..."
     sudo mkdir -p /etc/prometheus
     sudo chmod 755 /etc/prometheus
-fi
-
-# Check if Python dependencies are installed
-if ! python3 -c "import flask" &> /dev/null; then
-    echo "Installing required Python packages..."
-    pip install -r requirements.txt
 fi
 
 echo "========================================="

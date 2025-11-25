@@ -40,8 +40,9 @@ Main deployment script that orchestrates everything.
 - **What it does**:
   1. Checks and installs Podman if needed
   2. Checks and deploys Prometheus if needed
-  3. Verifies all installation scripts are available
-  4. Starts the Web UI
+  3. Installs system & Python dependencies (python3, pip, sshpass, curl, requirements.txt)
+  4. Verifies all installation scripts are available
+  5. Starts the Web UI
 
 ## Helper Scripts
 

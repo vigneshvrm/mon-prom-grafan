@@ -161,8 +161,8 @@ After successful setup:
 
 The new playbooks are designed to work alongside your existing setup:
 
-- Existing `scripts/check-podman.sh` can still be used
-- Existing `scripts/setup-prometheus.sh` can still be used
+- Existing `scripts/install-podman.sh` can still be used
+- Existing `scripts/install-prometheus.sh` can still be used
 - New Ansible playbooks provide production-grade alternative
 - Both approaches can coexist
 

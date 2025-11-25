@@ -35,6 +35,21 @@ Access:
 - **Web UI**: http://localhost:5000
 - **Prometheus UI**: http://localhost:9090
 
+## Automatic Dependencies
+
+`start-application.sh` installs all required dependencies automatically:
+
+- System packages: `python3`, `python3-pip`, `python3-venv`, `sshpass`, `curl`
+- Python packages: everything in `requirements.txt` (Flask, Ansible, PyYAML, bcrypt, pywinrm, etc.)
+
+If you run scripts manually, ensure these are installed first:
+
+```bash
+sudo apt-get install -y python3 python3-pip python3-venv sshpass curl
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
+
 ## Manual Start (if needed)
 
 If you just want to start the web UI without Prometheus setup:

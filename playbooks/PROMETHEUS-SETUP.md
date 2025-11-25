@@ -54,7 +54,7 @@ This will:
 ### Method 2: Using Shell Script
 
 ```bash
-bash scripts/setup-prometheus.sh start
+bash scripts/install-prometheus.sh start
 ```
 
 ### Method 3: Manual Setup
