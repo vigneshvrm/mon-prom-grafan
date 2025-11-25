@@ -89,8 +89,34 @@ else
 fi
 echo ""
 
-# Step 4: Verify installation scripts are available
-echo "[4/5] Verifying installation scripts..."
+# Step 4: Build React UI (if Node.js is available)
+echo "[4/6] Building React UI..."
+cd "${SCRIPT_DIR}/web-ui"
+
+if command -v npm &> /dev/null; then
+    # Check if node_modules exists, if not install dependencies
+    if [ ! -d "node_modules" ]; then
+        echo "Installing Node.js dependencies..."
+        npm install
+    fi
+    
+    # Build React app
+    if [ -d "node_modules" ]; then
+        echo "Building React application..."
+        npm run build || {
+            echo "Warning: React build failed. The application will use fallback template."
+        }
+    fi
+else
+    echo "Warning: npm not found. React UI will not be built."
+    echo "Install Node.js to build the modern UI: sudo apt install nodejs npm"
+fi
+
+cd "${SCRIPT_DIR}"
+echo ""
+
+# Step 5: Verify installation scripts are available
+echo "[5/6] Verifying installation scripts..."
 INSTALL_SCRIPTS=(
     "install-podman.sh"
     "install-prometheus.sh"
@@ -108,8 +134,36 @@ for script in "${INSTALL_SCRIPTS[@]}"; do
 done
 echo ""
 
-# Step 5: Start Web UI
-echo "[5/5] Starting Web UI..."
+# Step 5: Build React UI
+echo "[5/6] Building React UI..."
+cd "${SCRIPT_DIR}/web-ui"
+
+# Check if node_modules exists, if not install dependencies
+if [ ! -d "node_modules" ]; then
+    echo "Installing Node.js dependencies..."
+    if command -v npm &> /dev/null; then
+        npm install
+    else
+        echo "Warning: npm not found. React UI will not be built."
+        echo "Install Node.js and npm to build the UI, or use the old template."
+    fi
+fi
+
+# Build React app if npm is available
+if command -v npm &> /dev/null && [ -d "node_modules" ]; then
+    echo "Building React application..."
+    npm run build || {
+        echo "Warning: React build failed. The application will use fallback template."
+    }
+else
+    echo "Warning: Skipping React build. Using fallback template."
+fi
+
+cd "${SCRIPT_DIR}"
+echo ""
+
+# Step 6: Start Web UI
+echo "[6/6] Starting Web UI..."
 echo ""
 
 # Create necessary directories

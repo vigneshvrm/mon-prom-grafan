@@ -324,9 +324,49 @@ operation_timeout_sec = 10
         if node_info_path and os.path.exists(node_info_path):
             os.unlink(node_info_path)
 
-@app.route('/')
-def index():
-    """Render main page"""
+@app.route('/api/system/check-podman')
+def check_podman():
+    """Check if Podman is installed"""
+    try:
+        result = subprocess.run(
+            ['podman', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return jsonify({
+                'installed': True,
+                'version': result.stdout.strip()
+            })
+        else:
+            return jsonify({
+                'installed': False,
+                'version': None
+            })
+    except:
+        return jsonify({
+            'installed': False,
+            'version': None
+        })
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_react_app(path):
+    """Serve React application"""
+    # Serve React build files
+    static_dir = os.path.join(os.path.dirname(__file__), 'static')
+    
+    # If requesting a file that exists in static, serve it
+    if path and os.path.exists(os.path.join(static_dir, path)):
+        return send_from_directory(static_dir, path)
+    
+    # Otherwise serve index.html for React Router
+    index_path = os.path.join(static_dir, 'index.html')
+    if os.path.exists(index_path):
+        return send_from_directory(static_dir, 'index.html')
+    
+    # Fallback to old template if React build doesn't exist
     prometheus_status = check_prometheus_status()
     return render_template('index.html', prometheus_status=prometheus_status)
 
