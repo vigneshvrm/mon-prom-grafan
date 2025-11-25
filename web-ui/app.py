@@ -117,8 +117,15 @@ def generate_password_hash(password):
 
 def create_ansible_config(config_data):
     """Create Ansible extra vars file"""
+    # Normalize OS to lowercase and ensure it's valid
+    os_value = config_data.get('os', 'linux')
+    if isinstance(os_value, str):
+        os_value = os_value.lower()
+        if os_value == 'auto':
+            os_value = 'linux'  # Default auto to linux
+    
     extra_vars = {
-        'target_os': config_data.get('os', 'linux'),
+        'target_os': os_value,
         'node_exporter_port': '9100',  # Default port, no config needed
     }
     
@@ -250,6 +257,11 @@ operation_timeout_sec = 10
                 '  pip install ansible ansible-core'
             )
         
+        # Debug: Print what we're running
+        print(f"Running Ansible playbook: {playbook_path}")
+        print(f"Inventory: {inventory_path}")
+        print(f"Extra vars: {extra_vars}")
+        
         # Run ansible-playbook with aggressive timeout settings
         cmd = [
             ansible_playbook_cmd,
@@ -261,8 +273,9 @@ operation_timeout_sec = 10
             '--timeout=10',  # 10 second connection timeout
         ]
         
-        # Add SSH args for Linux connections
-        if extra_vars.get('os', 'linux') != 'windows':
+        # Add SSH args for Linux connections (check target_os, not os)
+        target_os_value = extra_vars.get('target_os', 'linux').lower()
+        if target_os_value != 'windows':
             cmd.extend([
                 '--ssh-common-args=-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2'
             ])

@@ -6,24 +6,25 @@
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Determine target OS
+    - name: Normalize and determine target OS
       set_fact:
-        target_os_determined: "{{ target_os | default('linux') | lower }}"
-      when: target_os is defined
+        target_os_determined: "{{ (target_os | default('linux') | string | lower) }}"
     
-    - name: Set default OS to linux if not specified
-      set_fact:
-        target_os_determined: "linux"
-      when: target_os is not defined
+    - name: Debug OS determination
+      debug:
+        msg:
+          - "Target OS received: {{ target_os | default('not_set') }}"
+          - "Target OS determined: {{ target_os_determined }}"
+          - "Will route to: {{ 'Windows' if target_os_determined == 'windows' else 'Linux' }}"
 
 - name: Install Node Exporter on Linux
   import_playbook: linux-node-exporter.yml
-  when: target_os_determined | default('linux') | lower != 'windows'
+  when: target_os_determined != 'windows'
 
 - name: Configure WinRM for Windows (must run before Windows Exporter)
   import_playbook: configure-winrm.yml
-  when: target_os_determined | default('linux') | lower == 'windows'
+  when: target_os_determined == 'windows'
 
 - name: Install Windows Exporter
   import_playbook: windows-node-exporter.yml
-  when: target_os_determined | default('linux') | lower == 'windows'
+  when: target_os_determined == 'windows'
