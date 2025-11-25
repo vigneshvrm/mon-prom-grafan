@@ -131,6 +131,24 @@ install_python_dependencies() {
     else
         echo "✓ Ansible installed successfully"
     fi
+    
+    # Verify Flask is installed
+    if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
+        echo "Warning: Flask not found. Installing Flask..."
+        "$PIP_BIN" install Flask Werkzeug || {
+            echo "Error: Failed to install Flask."
+            exit 1
+        }
+    fi
+    
+    # Verify Flask installation
+    if "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
+        FLASK_VERSION=$("${PYTHON_BIN}" -c "import flask; print(flask.__version__)" 2>/dev/null)
+        echo "✓ Flask installed: ${FLASK_VERSION}"
+    else
+        echo "Error: Flask installation verification failed."
+        exit 1
+    fi
 }
 
 build_react_ui() {
@@ -285,4 +303,28 @@ echo "Press Ctrl+C to stop"
 echo ""
 
 cd "${SCRIPT_DIR}/web-ui"
+
+# Verify Flask is installed in venv
+if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
+    echo "Error: Flask not found in virtual environment."
+    echo "Installing Flask and dependencies..."
+    "${PIP_BIN}" install -r "${SCRIPT_DIR}/requirements.txt" || {
+        echo "Error: Failed to install Python dependencies."
+        exit 1
+    }
+fi
+
+# Verify Flask is now available
+if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
+    echo "Error: Flask still not available after installation attempt."
+    echo "Please run manually:"
+    echo "  cd ${SCRIPT_DIR}"
+    echo "  source .venv/bin/activate"
+    echo "  pip install -r requirements.txt"
+    exit 1
+fi
+
+echo "✓ Flask and dependencies verified"
+echo ""
+
 "${PYTHON_BIN}" app.py
