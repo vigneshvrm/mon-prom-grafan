@@ -27,6 +27,11 @@ export interface PrometheusStatus {
   reload_api: string;
 }
 
+export interface PodmanStatus {
+  installed: boolean;
+  version?: string | null;
+}
+
 class ApiService {
   private baseUrl = '/api';
 
@@ -34,6 +39,14 @@ class ApiService {
     const response = await fetch(`${this.baseUrl}/prometheus-status`);
     if (!response.ok) {
       throw new Error('Failed to fetch Prometheus status');
+    }
+    return response.json();
+  }
+
+  async getPodmanStatus(): Promise<PodmanStatus> {
+    const response = await fetch(`${this.baseUrl}/system/check-podman`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch Podman status');
     }
     return response.json();
   }

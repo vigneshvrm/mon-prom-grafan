@@ -4,7 +4,7 @@ import { BootSequence } from './components/BootSequence';
 import { ServerCard } from './components/ServerCard';
 import { AddServerModal } from './components/AddServerModal';
 import { MonitoredServer, ServerStatus } from './types';
-import { apiService } from './services/apiService';
+import { apiService, PrometheusStatus, PodmanStatus } from './services/apiService';
 import { LayoutDashboard, Plus, Settings, Activity, TrendingUp, AlertCircle } from 'lucide-react';
 
 const SidebarItem = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
@@ -132,91 +132,121 @@ const DashboardContent: React.FC<{
   );
 };
 
-const SettingsContent = () => (
-  <div className="max-w-3xl space-y-8 fade-in">
-    <div className="space-y-1">
-      <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
-        System Settings
-      </h1>
-      <p className="text-slate-400 text-sm">Configure monitoring infrastructure and runtime settings</p>
-    </div>
-    
-    <div className="bg-gradient-to-br from-slate-800 to-slate-800/50 rounded-2xl border border-slate-700/50 p-8 space-y-8 shadow-xl">
-      {/* Container Runtime Section */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-blue-500/10 rounded-lg">
-            <Activity className="w-5 h-5 text-blue-400" />
-          </div>
-          <h3 className="text-xl font-semibold text-slate-200">Container Runtime</h3>
-        </div>
-        
-        <div className="flex items-center justify-between p-5 bg-slate-900/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200">
-          <div className="space-y-1">
-            <div className="font-semibold text-slate-200 flex items-center gap-2">
-              Podman Runtime
-              <span className="text-xs font-normal text-slate-500">v4.5.1</span>
-            </div>
-            <div className="text-sm text-slate-400">Container orchestration engine</div>
-          </div>
-          <span className="px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full text-sm font-semibold flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-            Installed
-          </span>
-        </div>
-      </div>
+const SettingsContent: React.FC<{
+  podmanStatus: PodmanStatus | null;
+  prometheusStatus: PrometheusStatus | null;
+}> = ({ podmanStatus, prometheusStatus }) => {
+  const podmanInstalled = podmanStatus?.installed;
+  const podmanVersionMatch = podmanStatus?.version?.match(/([0-9]+(\.[0-9]+){0,2})/);
+  const podmanVersionLabel = podmanVersionMatch ? `v${podmanVersionMatch[1]}` : podmanStatus?.version || 'Unavailable';
+  const podmanBadgeClasses = podmanInstalled
+    ? 'px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full text-sm font-semibold flex items-center gap-2'
+    : 'px-4 py-2 bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-full text-sm font-semibold flex items-center gap-2';
 
-      {/* Prometheus Configuration Section */}
-      <div className="space-y-4 pt-4 border-t border-slate-700/50">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-purple-500/10 rounded-lg">
-            <Settings className="w-5 h-5 text-purple-400" />
+  const promRunning = prometheusStatus?.running;
+  const promStatusLabel = promRunning ? 'Running' : 'Not Running';
+  const promStatusSubtext = promRunning
+    ? `Source: ${prometheusStatus?.type || 'unknown'}`
+    : 'Run ./start-application.sh to deploy Prometheus';
+  const promBadgeClasses = promRunning
+    ? 'px-4 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded-full text-sm font-semibold flex items-center gap-2'
+    : 'px-4 py-2 bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-full text-sm font-semibold flex items-center gap-2';
+
+  return (
+    <div className="max-w-3xl space-y-8 fade-in">
+      <div className="space-y-1">
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
+          System Settings
+        </h1>
+        <p className="text-slate-400 text-sm">Configure monitoring infrastructure and runtime settings</p>
+      </div>
+      
+      <div className="bg-gradient-to-br from-slate-800 to-slate-800/50 rounded-2xl border border-slate-700/50 p-8 space-y-8 shadow-xl">
+        {/* Container Runtime Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <Activity className="w-5 h-5 text-blue-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-slate-200">Container Runtime</h3>
           </div>
-          <h3 className="text-xl font-semibold text-slate-200">Prometheus Configuration</h3>
-        </div>
-        
-        <div className="flex items-center justify-between p-5 bg-slate-900/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200 mb-4">
-          <div className="space-y-1">
-            <div className="font-semibold text-slate-200">Service Status</div>
-            <div className="text-sm text-slate-400">Listening on port 9090</div>
+          
+          <div className="flex items-center justify-between p-5 bg-slate-900/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200">
+            <div className="space-y-1">
+              <div className="font-semibold text-slate-200 flex items-center gap-2">
+                Podman Runtime
+                <span className="text-xs font-normal text-slate-500">
+                  {podmanStatus ? podmanVersionLabel : 'Detecting...'}
+                </span>
+              </div>
+              <div className="text-sm text-slate-400">
+                {podmanStatus?.version || 'Container orchestration engine'}
+              </div>
+            </div>
+            <span className={podmanBadgeClasses}>
+              <div className={`w-2 h-2 rounded-full ${podmanInstalled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></div>
+              {podmanInstalled ? 'Installed' : 'Not Detected'}
+            </span>
           </div>
-          <span className="px-4 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded-full text-sm font-semibold flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
-            Running
-          </span>
         </div>
-        
-        <div className="space-y-2">
-          <label className="block text-sm font-semibold text-slate-300 uppercase tracking-wider">
-            Scrape Interval
-          </label>
-          <select className="bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-4 py-3 w-full max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 font-medium">
-            <option>15s (Default)</option>
-            <option>30s</option>
-            <option>1m</option>
-            <option>5m</option>
-          </select>
-          <p className="text-xs text-slate-500 mt-1">Frequency of metric collection from targets</p>
+
+        {/* Prometheus Configuration Section */}
+        <div className="space-y-4 pt-4 border-t border-slate-700/50">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-purple-500/10 rounded-lg">
+              <Settings className="w-5 h-5 text-purple-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-slate-200">Prometheus Configuration</h3>
+          </div>
+          
+          <div className="flex items-center justify-between p-5 bg-slate-900/50 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200 mb-4">
+            <div className="space-y-1">
+              <div className="font-semibold text-slate-200">Service Status</div>
+              <div className="text-sm text-slate-400">{promStatusSubtext}</div>
+            </div>
+            <span className={promBadgeClasses}>
+              <div className={`w-2 h-2 rounded-full ${promRunning ? 'bg-blue-400 animate-pulse' : 'bg-rose-400'}`}></div>
+              {prometheusStatus ? promStatusLabel : 'Checking...'}
+            </span>
+          </div>
+          
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-slate-300 uppercase tracking-wider">
+              Scrape Interval
+            </label>
+            <select className="bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-4 py-3 w-full max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 font-medium">
+              <option>15s (Default)</option>
+              <option>30s</option>
+              <option>1m</option>
+              <option>5m</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">Frequency of metric collection from targets</p>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const App: React.FC = () => {
   const [isBooted, setIsBooted] = useState(false);
   const [servers, setServers] = useState<MonitoredServer[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [prometheusStatus, setPrometheusStatus] = useState<any>(null);
+  const [prometheusStatus, setPrometheusStatus] = useState<PrometheusStatus | null>(null);
+  const [podmanStatus, setPodmanStatus] = useState<PodmanStatus | null>(null);
 
-  // Fetch Prometheus status on mount
+  // Fetch infrastructure status on mount
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const status = await apiService.getPrometheusStatus();
-        setPrometheusStatus(status);
+        const [promStatus, podStatus] = await Promise.all([
+          apiService.getPrometheusStatus(),
+          apiService.getPodmanStatus()
+        ]);
+        setPrometheusStatus(promStatus);
+        setPodmanStatus(podStatus);
       } catch (error) {
-        console.error('Failed to fetch Prometheus status:', error);
+        console.error('Failed to fetch infrastructure status:', error);
       }
     };
     fetchStatus();
@@ -269,7 +299,10 @@ const App: React.FC = () => {
         <main className="flex-1 md:ml-72 p-6 md:p-10 overflow-x-hidden">
           <Routes>
             <Route path="/" element={<DashboardContent servers={servers} onAddClick={() => setIsModalOpen(true)} />} />
-            <Route path="/settings" element={<SettingsContent />} />
+            <Route 
+              path="/settings" 
+              element={<SettingsContent podmanStatus={podmanStatus} prometheusStatus={prometheusStatus} />} 
+            />
           </Routes>
         </main>
 
