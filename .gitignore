@@ -66,3 +66,9 @@ web-ui/uploads/*
 tmp/*
 !tmp/.gitkeep
 *.tmp
+
+# Prometheus binaries (using containers instead)
+**/prometheus-*.tar.gz
+**/prometheus-*/
+!prometheus-config/
+!prometheus-data/
