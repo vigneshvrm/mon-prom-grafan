@@ -99,10 +99,22 @@ install_python_dependencies() {
     echo "Installing Python dependencies inside ${VENV_PATH}..."
     "$PIP_BIN" install --upgrade pip setuptools wheel
     
-    # Install remaining requirements (includes ansible)
-    "$PIP_BIN" install -r "${SCRIPT_DIR}/requirements.txt" || {
-        echo "Warning: Some packages failed to install. Check errors above."
-    }
+    # Install remaining requirements (includes ansible, flask, bcrypt, etc.)
+    echo "Installing packages from requirements.txt..."
+    if ! "$PIP_BIN" install -r "${SCRIPT_DIR}/requirements.txt"; then
+        echo "Error: Failed to install packages from requirements.txt"
+        echo "Attempting to install packages individually..."
+        
+        # Install critical packages individually
+        "$PIP_BIN" install Flask>=2.3.0 || echo "Warning: Flask installation failed"
+        "$PIP_BIN" install Werkzeug>=2.3.0 || echo "Warning: Werkzeug installation failed"
+        "$PIP_BIN" install bcrypt>=4.0.0 || echo "Warning: bcrypt installation failed"
+        "$PIP_BIN" install PyYAML>=6.0 || echo "Warning: PyYAML installation failed"
+        "$PIP_BIN" install pywinrm>=0.3.0 || echo "Warning: pywinrm installation failed"
+        "$PIP_BIN" install requests>=2.31.0 || echo "Warning: requests installation failed"
+        "$PIP_BIN" install ansible>=7.0.0 || echo "Warning: ansible installation failed"
+        "$PIP_BIN" install ansible-core>=2.14.0 || echo "Warning: ansible-core installation failed"
+    fi
     
     # Verify Ansible is installed
     if [ ! -f "${VENV_PATH}/bin/ansible-playbook" ]; then
@@ -132,22 +144,64 @@ install_python_dependencies() {
         echo "✓ Ansible installed successfully"
     fi
     
-    # Verify Flask is installed
-    if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
-        echo "Warning: Flask not found. Installing Flask..."
-        "$PIP_BIN" install Flask Werkzeug || {
-            echo "Error: Failed to install Flask."
-            exit 1
-        }
+    # Verify all critical packages are installed
+    echo "Verifying critical Python packages..."
+    
+    CRITICAL_PACKAGES=("flask" "bcrypt" "yaml" "requests")
+    MISSING_PACKAGES=()
+    
+    for package in "${CRITICAL_PACKAGES[@]}"; do
+        if ! "${PYTHON_BIN}" -c "import ${package}" 2>/dev/null; then
+            MISSING_PACKAGES+=("${package}")
+        fi
+    done
+    
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        echo "Warning: Missing packages: ${MISSING_PACKAGES[*]}"
+        echo "Installing missing packages..."
+        
+        for package in "${MISSING_PACKAGES[@]}"; do
+            case "$package" in
+                "flask")
+                    "$PIP_BIN" install Flask Werkzeug || echo "Error: Failed to install Flask"
+                    ;;
+                "bcrypt")
+                    "$PIP_BIN" install bcrypt || echo "Error: Failed to install bcrypt"
+                    ;;
+                "yaml")
+                    "$PIP_BIN" install PyYAML || echo "Error: Failed to install PyYAML"
+                    ;;
+                "requests")
+                    "$PIP_BIN" install requests || echo "Error: Failed to install requests"
+                    ;;
+            esac
+        done
+        
+        # Verify again
+        for package in "${MISSING_PACKAGES[@]}"; do
+            if ! "${PYTHON_BIN}" -c "import ${package}" 2>/dev/null; then
+                echo "Error: ${package} still not available after installation attempt."
+                exit 1
+            fi
+        done
     fi
     
-    # Verify Flask installation
+    # Show installed versions
     if "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
         FLASK_VERSION=$("${PYTHON_BIN}" -c "import flask; print(flask.__version__)" 2>/dev/null)
-        echo "✓ Flask installed: ${FLASK_VERSION}"
-    else
-        echo "Error: Flask installation verification failed."
-        exit 1
+        echo "✓ Flask: ${FLASK_VERSION}"
+    fi
+    
+    if "${PYTHON_BIN}" -c "import bcrypt" 2>/dev/null; then
+        echo "✓ bcrypt: installed"
+    fi
+    
+    if "${PYTHON_BIN}" -c "import yaml" 2>/dev/null; then
+        echo "✓ PyYAML: installed"
+    fi
+    
+    if "${PYTHON_BIN}" -c "import requests" 2>/dev/null; then
+        echo "✓ requests: installed"
     fi
 }
 
