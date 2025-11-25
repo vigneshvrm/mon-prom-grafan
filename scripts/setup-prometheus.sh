@@ -8,6 +8,31 @@ PROMETHEUS_CONTAINER_NAME="prometheus"
 PROMETHEUS_PORT="9090"
 PROMETHEUS_CONFIG_DIR="/etc/prometheus"
 
+check_existing_prometheus() {
+    # Check if Prometheus is running as systemd service
+    if command -v systemctl &> /dev/null; then
+        if systemctl is-active --quiet prometheus 2>/dev/null; then
+            echo "ERROR: Prometheus is already installed and running as a systemd service."
+            echo "Please stop it first with: sudo systemctl stop prometheus"
+            echo "Or use the existing installation."
+            exit 1
+        fi
+    fi
+    
+    # Check if Prometheus container is running
+    if command -v podman &> /dev/null; then
+        if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^${PROMETHEUS_CONTAINER_NAME}$"; then
+            if podman inspect "${PROMETHEUS_CONTAINER_NAME}" --format='{{.State.Status}}' 2>/dev/null | grep -q "running"; then
+                echo "ERROR: Prometheus container is already running."
+                echo "Use 'podman restart prometheus' or 'podman stop prometheus' to manage it."
+                exit 1
+            fi
+        fi
+    fi
+    
+    echo "✓ No existing Prometheus installation found. Proceeding with installation..."
+}
+
 ensure_podman() {
     if ! command -v podman &> /dev/null; then
         echo "Podman is not installed. Please install it first."
@@ -119,10 +144,11 @@ get_prometheus_status() {
 }
 
 main() {
-    ensure_podman
-    
     case "${1:-start}" in
         start)
+            # Check for existing Prometheus installation first
+            check_existing_prometheus
+            ensure_podman
             create_prometheus_config
             if ! check_container_running; then
                 pull_prometheus_image

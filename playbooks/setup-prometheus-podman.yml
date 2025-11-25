@@ -31,6 +31,46 @@
     enable_prometheus_ui: true
 
   tasks:
+    # Pre-installation checks: Verify Prometheus is not already installed
+    - name: Check if Prometheus is running as systemd service
+      command: systemctl is-active prometheus
+      register: systemd_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Check if Prometheus container is running
+      command: podman ps --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name={{ prometheus_container_name }}" --filter "status=running"
+      register: container_running_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Check if Prometheus container exists (stopped)
+      command: podman ps -a --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name={{ prometheus_container_name }}"
+      register: container_exists_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Display Prometheus installation status
+      debug:
+        msg:
+          - "Checking existing Prometheus installation..."
+          - "Systemd Service: {{ 'Running' if systemd_check.rc == 0 else 'Not running' }}"
+          - "Container (Running): {{ 'Running' if container_running_check.stdout == prometheus_container_name else 'Not running' }}"
+          - "Container (Exists): {{ 'Exists' if container_exists_check.stdout == prometheus_container_name else 'Does not exist' }}"
+
+    - name: Fail if Prometheus is already installed as systemd service
+      fail:
+        msg: "Prometheus is already installed and running as a systemd service. Please stop it first or use the existing installation."
+      when: systemd_check.rc == 0
+
+    - name: Fail if Prometheus container is already running
+      fail:
+        msg: "Prometheus container is already running. Use 'podman restart prometheus' or 'podman stop prometheus' to manage it."
+      when: container_running
+
     - name: Verify Podman is installed
       command: podman --version
       register: podman_version_check
@@ -56,23 +96,11 @@
         group: root
 
 
-    # Check if container already exists
-    - name: Check if Prometheus container exists
-      command: podman ps -a --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name={{ prometheus_container_name }}"
-      register: container_exists_check
-      changed_when: false
-      failed_when: false
-
-    - name: Check if Prometheus container is running
-      command: podman ps --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name={{ prometheus_container_name }}" --filter "status=running"
-      register: container_running_check
-      changed_when: false
-      failed_when: false
-
-    - name: Display container status
-      debug:
-        msg: "Prometheus container status: {{ 'Running' if container_running_check.stdout == prometheus_container_name else 'Not running' }}"
-      when: container_exists_check.stdout == prometheus_container_name
+    # Container status already checked above, but we need these variables for later tasks
+    - name: Set container status variables
+      set_fact:
+        container_exists: "{{ container_exists_check.stdout == prometheus_container_name }}"
+        container_running: "{{ container_running_check.stdout == prometheus_container_name }}"
 
     # Check if prometheus.yml exists
     - name: Check if prometheus.yml exists
@@ -98,28 +126,15 @@
       command: podman pull "{{ prometheus_image }}"
       register: image_pull_result
       changed_when: true
-      when: container_exists_check.stdout != prometheus_container_name
+      when: not container_exists
 
     - name: Display image pull status
       debug:
         msg: "Prometheus image: {{ 'Pulled successfully' if image_pull_result.rc == 0 else 'Pull failed' }}"
       when: image_pull_result is defined
 
-    # Stop existing container if running
-    - name: Stop existing Prometheus container
-      command: podman stop "{{ prometheus_container_name }}"
-      register: stop_result
-      changed_when: stop_result.rc == 0
-      failed_when: false
-      when: container_running_check.stdout == prometheus_container_name
-
-    # Remove existing container if it exists
-    - name: Remove existing Prometheus container
-      command: podman rm "{{ prometheus_container_name }}"
-      register: remove_result
-      changed_when: remove_result.rc == 0
-      failed_when: false
-      when: container_exists_check.stdout == prometheus_container_name and container_running_check.stdout != prometheus_container_name
+    # Note: We don't stop/remove existing containers here because
+    # the pre-installation check already prevents installation if container is running
 
     # Create and start Prometheus container with production settings
     - name: Create and start Prometheus container (Production)
@@ -139,13 +154,13 @@
         --config.file=/etc/prometheus/prometheus.yml
       register: container_create_result
       changed_when: container_create_result.rc == 0
-      when: container_exists_check.stdout != prometheus_container_name
+      when: not container_exists
 
-    - name: Start existing Prometheus container
+    - name: Start existing Prometheus container (if stopped)
       command: podman start "{{ prometheus_container_name }}"
       register: container_start_result
       changed_when: container_start_result.rc == 0
-      when: container_exists_check.stdout == prometheus_container_name and container_running_check.stdout != prometheus_container_name
+      when: container_exists and not container_running
 
     # Wait for Prometheus to be healthy
     - name: Wait for Prometheus to be healthy
@@ -197,7 +212,7 @@
           - "=========================================="
           - "Container Name: {{ prometheus_container_name }}"
           - "Image: {{ prometheus_image }}"
-          - "Status: {{ 'Running' if container_running_check.stdout == prometheus_container_name else 'Stopped' }}"
+          - "Status: {{ 'Running' if container_running else 'Stopped' }}"
           - "Port: {{ prometheus_port }}"
           - "Health: {{ 'Healthy' if health_check.status == 200 else 'Unhealthy' }}"
           - "Readiness: {{ 'Ready' if readiness_check.status == 200 else 'Not Ready' }}"
@@ -250,7 +265,7 @@
         timeout: 5
       failed_when: false
       ignore_errors: true
-      when: container_running_check.stdout == prometheus_container_name
+      when: container_running
 
     - name: reload systemd
       systemd:

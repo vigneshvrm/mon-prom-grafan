@@ -33,11 +33,18 @@ if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     PROM_STATUS=$(bash "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" 2>/dev/null || echo "not_running")
     
     if [ "$PROM_STATUS" = "not_running" ]; then
-        echo "Prometheus is not running. Starting Prometheus container..."
+        echo "Prometheus is not running. Attempting to start Prometheus container..."
+        echo "Note: This will check for existing installations first."
         if [ -f "${SCRIPT_DIR}/scripts/setup-prometheus.sh" ]; then
             bash "${SCRIPT_DIR}/scripts/setup-prometheus.sh" start || {
-                echo "Warning: Failed to start Prometheus container. Continuing anyway..."
-                echo "You can start it manually later with:"
+                echo "Warning: Failed to start Prometheus container. This may be because:"
+                echo "  - Prometheus is already installed as a systemd service"
+                echo "  - Prometheus container is already running"
+                echo "  - Installation failed (check logs above)"
+                echo ""
+                echo "You can check status with:"
+                echo "  bash ${SCRIPT_DIR}/scripts/check-prometheus-service.sh"
+                echo "Or start manually with:"
                 echo "  bash ${SCRIPT_DIR}/scripts/setup-prometheus.sh start"
             }
         else
@@ -45,9 +52,10 @@ if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
         fi
     else
         echo "✓ Prometheus is already running (${PROM_STATUS})"
+        echo "  No installation needed."
     fi
 else
-    echo "Warning: check-prometheus-service.sh not found. Assuming Prometheus is running."
+    echo "Warning: check-prometheus-service.sh not found. Skipping Prometheus check."
 fi
 echo ""
 

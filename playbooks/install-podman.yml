@@ -72,23 +72,38 @@
         state: present
       when: is_debian_based and podman_check.rc != 0
 
-    - name: Add Podman repository key (Ubuntu/Debian)
-      apt_key:
-        url: https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/Debian_Testing/Release.key
-        state: present
+    - name: Add Podman repository (Ubuntu) - Method that works perfectly
+      shell: |
+        echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/ /" | tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+      args:
+        creates: /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
       when: is_debian_based and is_ubuntu and podman_check.rc != 0
-      ignore_errors: true
+      become: true
 
-    - name: Add Podman repository (Ubuntu)
-      apt_repository:
-        repo: "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/ /"
-        state: present
-        filename: podman
+    - name: Add Podman repository GPG key (Ubuntu) - Method that works perfectly
+      shell: |
+        curl -L "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/Release.key" | apt-key add -
+      when: is_debian_based and is_ubuntu and podman_check.rc != 0
+      become: true
+
+    - name: Update apt cache after adding Podman repository (Ubuntu)
+      apt:
         update_cache: yes
+        cache_valid_time: 3600
       when: is_debian_based and is_ubuntu and podman_check.rc != 0
-      ignore_errors: true
+      become: true
 
-    - name: Install Podman (Ubuntu/Debian)
+    - name: Install Podman (Ubuntu) - Method that works perfectly
+      apt:
+        name:
+          - podman
+        state: present
+        update_cache: no
+      when: is_debian_based and is_ubuntu and podman_check.rc != 0
+      become: true
+      register: podman_install_ubuntu
+
+    - name: Install Podman (Debian - non-Ubuntu)
       apt:
         name:
           - podman
@@ -97,7 +112,7 @@
           - skopeo  # For container image management
         state: present
         update_cache: yes
-      when: is_debian_based and podman_check.rc != 0
+      when: is_debian_based and not is_ubuntu and podman_check.rc != 0
       register: podman_install_debian
 
     # RHEL/CentOS/Fedora Installation
