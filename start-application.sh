@@ -59,8 +59,13 @@ echo ""
 mkdir -p "${SCRIPT_DIR}/certs"
 mkdir -p "${SCRIPT_DIR}/web-ui/uploads"
 mkdir -p "${SCRIPT_DIR}/tmp"
-mkdir -p "${SCRIPT_DIR}/prometheus-config"
-mkdir -p "${SCRIPT_DIR}/prometheus-data"
+
+# Create /etc/prometheus directory if it doesn't exist (requires sudo)
+if [ ! -d "/etc/prometheus" ]; then
+    echo "Creating /etc/prometheus directory..."
+    sudo mkdir -p /etc/prometheus
+    sudo chmod 755 /etc/prometheus
+fi
 
 # Check if Python dependencies are installed
 if ! python3 -c "import flask" &> /dev/null; then

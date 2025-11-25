@@ -13,8 +13,7 @@
     prometheus_image: "docker.io/prom/prometheus:{{ prometheus_version }}"
     prometheus_container_name: "prometheus"
     prometheus_port: 9090
-    prometheus_config_dir: "{{ playbook_dir }}/../prometheus-config"
-    prometheus_data_dir: "{{ playbook_dir }}/../prometheus-data"
+    prometheus_config_dir: "/etc/prometheus"  # System-wide configuration directory
     prometheus_retention: "30d"  # Data retention period
     prometheus_scrape_interval: "15s"
     prometheus_evaluation_interval: "15s"
@@ -53,16 +52,9 @@
         path: "{{ prometheus_config_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user | default('root') }}"
-        group: "{{ ansible_user | default('root') }}"
+        owner: root
+        group: root
 
-    - name: Create Prometheus data directory
-      file:
-        path: "{{ prometheus_data_dir }}"
-        state: directory
-        mode: '0755'
-        owner: "{{ ansible_user | default('root') }}"
-        group: "{{ ansible_user | default('root') }}"
 
     # Check if container already exists
     - name: Check if Prometheus container exists
@@ -82,14 +74,24 @@
         msg: "Prometheus container status: {{ 'Running' if container_running_check.stdout == prometheus_container_name else 'Not running' }}"
       when: container_exists_check.stdout == prometheus_container_name
 
+    # Check if prometheus.yml exists
+    - name: Check if prometheus.yml exists
+      stat:
+        path: "{{ prometheus_config_dir }}/prometheus.yml"
+      register: prometheus_config_stat
+      changed_when: false
+
     # Create production-grade Prometheus configuration
     - name: Create production Prometheus configuration
       template:
         src: prometheus.yml.j2
         dest: "{{ prometheus_config_dir }}/prometheus.yml"
         mode: '0644'
+        owner: root
+        group: root
         backup: yes
       notify: reload prometheus
+      when: not prometheus_config_stat.stat.exists
 
     # Pull Prometheus image
     - name: Pull Prometheus image
@@ -125,40 +127,16 @@
         podman run -d
         --name {{ prometheus_container_name }}
         --restart={{ container_restart_policy }}
-        --network={{ container_network_mode }}
-        --user={{ container_user }}
-        --memory={{ container_memory_limit }}
-        --cpus={{ container_cpu_limit }}
+        -v /etc/hosts:/etc/hosts
+        --dns 8.8.8.8
+        --dns 1.1.1.1
+        -v {{ prometheus_config_dir }}:/etc/prometheus
         -p {{ prometheus_port }}:9090
-        -v {{ prometheus_config_dir }}:/etc/prometheus:Z,ro
-        -v {{ prometheus_data_dir }}:/prometheus:Z
         --label "app=prometheus"
         --label "version={{ prometheus_version }}"
         --label "managed-by=ansible"
-        --health-cmd="wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"
-        --health-interval=30s
-        --health-timeout=10s
-        --health-retries=3
-        --health-start-period=40s
         {{ prometheus_image }}
         --config.file=/etc/prometheus/prometheus.yml
-        --storage.tsdb.path=/prometheus
-        --storage.tsdb.retention.time={{ prometheus_storage_tsdb_retention_time }}
-        --storage.tsdb.retention.size={{ prometheus_storage_tsdb_retention_size }}
-        --storage.tsdb.max-block-duration=2h
-        --storage.tsdb.min-block-duration=2h
-        --web.console.libraries=/usr/share/prometheus/console_libraries
-        --web.console.templates=/usr/share/prometheus/consoles
-        --web.enable-lifecycle={{ enable_web_lifecycle | lower }}
-        --web.enable-admin-api={{ enable_web_enable_admin_api | lower }}
-        --web.max-connections=512
-        --query.max-concurrency={{ prometheus_max_concurrency }}
-        --query.timeout=2m
-        --query.max-samples=50000000
-        --query.lookback-delta=5m
-        --rules.alert.for-outage-tolerance=1h
-        --rules.alert.for-grace-period=10m
-        --rules.alert.resend-delay=1m
       register: container_create_result
       changed_when: container_create_result.rc == 0
       when: container_exists_check.stdout != prometheus_container_name
@@ -225,7 +203,6 @@
           - "Readiness: {{ 'Ready' if readiness_check.status == 200 else 'Not Ready' }}"
           - "Access URL: http://localhost:{{ prometheus_port }}"
           - "Config Directory: {{ prometheus_config_dir }}"
-          - "Data Directory: {{ prometheus_data_dir }}"
           - "=========================================="
 
     # Create systemd service for container (optional, for better management)

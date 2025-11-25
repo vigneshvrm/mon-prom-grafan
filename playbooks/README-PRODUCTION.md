@@ -219,14 +219,11 @@ podman rm prometheus
 ansible-playbook playbooks/setup-prometheus-podman.yml
 ```
 
-### Backup Prometheus Data
+### Backup Prometheus Configuration
 
 ```bash
-# Backup data directory
-tar -czf prometheus-backup-$(date +%Y%m%d).tar.gz prometheus-data/
-
 # Backup configuration
-cp prometheus-config/prometheus.yml prometheus-config/prometheus.yml.backup
+sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.backup.$(date +%Y%m%d)
 ```
 
 ### Reload Prometheus Configuration

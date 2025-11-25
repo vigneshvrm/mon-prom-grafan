@@ -30,8 +30,7 @@ os.makedirs('certs', exist_ok=True)
 
 def check_prometheus_status():
     """Check if Prometheus is running (Podman container or systemd service)"""
-    monitoring_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    prometheus_config_path = os.path.join(monitoring_dir, 'prometheus-config', 'prometheus.yml')
+    prometheus_config_path = '/etc/prometheus/prometheus.yml'
     
     # Check Podman container first
     try:
@@ -108,7 +107,7 @@ def check_prometheus_status():
     return {
         'running': False,
         'type': 'not_running',
-        'config_path': prometheus_config_path,  # Still return path for Podman setup
+        'config_path': prometheus_config_path,
         'reload_api': 'http://localhost:9090/-/reload'
     }
 

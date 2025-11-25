@@ -94,9 +94,8 @@ Monitoring/
 │       └── index.html    # Web UI
 ├── prometheus/            # Prometheus manager
 │   └── prometheus_manager.py
-├── prometheus-config/     # Prometheus config (auto-created)
+├── /etc/prometheus/       # Prometheus config (system directory)
 │   └── prometheus.yml
-├── prometheus-data/       # Prometheus data (auto-created)
 └── start-application.sh   # Main startup script
 ```
 
@@ -122,10 +121,10 @@ bash scripts/setup-prometheus.sh restart
 
 ### Prometheus Configuration Location
 
-- **Podman Container**: `Monitoring/prometheus-config/prometheus.yml`
-- **Systemd Service**: `/etc/prometheus/prometheus.yml`
-
-The application automatically detects which one is running.
+- **Configuration Path**: `/etc/prometheus/prometheus.yml`
+- **Container**: Prometheus runs in Podman container with `/etc/prometheus` mounted
+- **DNS**: Container uses DNS servers 8.8.8.8 and 1.1.1.1
+- **Hosts File**: Container mounts `/etc/hosts` from host for name resolution
 
 ### Ansible Inventory
 

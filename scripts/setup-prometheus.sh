@@ -6,12 +6,7 @@ set -e
 PROMETHEUS_IMAGE="docker.io/prom/prometheus:latest"
 PROMETHEUS_CONTAINER_NAME="prometheus"
 PROMETHEUS_PORT="9090"
-
-# Get Monitoring directory (parent of scripts)
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-MONITORING_DIR="$( cd "${SCRIPT_DIR}/.." && pwd )"
-PROMETHEUS_CONFIG_DIR="${MONITORING_DIR}/prometheus-config"
-PROMETHEUS_DATA_DIR="${MONITORING_DIR}/prometheus-data"
+PROMETHEUS_CONFIG_DIR="/etc/prometheus"
 
 ensure_podman() {
     if ! command -v podman &> /dev/null; then
@@ -37,11 +32,14 @@ check_container_exists() {
 }
 
 create_prometheus_config() {
-    mkdir -p "${PROMETHEUS_CONFIG_DIR}"
-    mkdir -p "${PROMETHEUS_DATA_DIR}"
+    # Create directory with sudo if needed
+    if [ ! -d "${PROMETHEUS_CONFIG_DIR}" ]; then
+        sudo mkdir -p "${PROMETHEUS_CONFIG_DIR}"
+        sudo chmod 755 "${PROMETHEUS_CONFIG_DIR}"
+    fi
     
     if [ ! -f "${PROMETHEUS_CONFIG_DIR}/prometheus.yml" ]; then
-        cat > "${PROMETHEUS_CONFIG_DIR}/prometheus.yml" <<EOF
+        sudo tee "${PROMETHEUS_CONFIG_DIR}/prometheus.yml" > /dev/null <<EOF
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -51,6 +49,7 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 EOF
+        sudo chmod 644 "${PROMETHEUS_CONFIG_DIR}/prometheus.yml"
         echo "Created default Prometheus configuration at ${PROMETHEUS_CONFIG_DIR}/prometheus.yml"
     fi
 }
@@ -68,16 +67,13 @@ start_prometheus_container() {
         echo "Creating and starting Prometheus container..."
         podman run -d \
             --name "${PROMETHEUS_CONTAINER_NAME}" \
+            -v /etc/hosts:/etc/hosts \
+            --dns 8.8.8.8 \
+            --dns 1.1.1.1 \
+            -v "${PROMETHEUS_CONFIG_DIR}:/etc/prometheus" \
             -p "${PROMETHEUS_PORT}:9090" \
-            -v "${PROMETHEUS_CONFIG_DIR}:/etc/prometheus:Z" \
-            -v "${PROMETHEUS_DATA_DIR}:/prometheus:Z" \
-            --restart=unless-stopped \
             "${PROMETHEUS_IMAGE}" \
-            --config.file=/etc/prometheus/prometheus.yml \
-            --storage.tsdb.path=/prometheus \
-            --web.console.libraries=/usr/share/prometheus/console_libraries \
-            --web.console.templates=/usr/share/prometheus/consoles \
-            --web.enable-lifecycle
+            --config.file=/etc/prometheus/prometheus.yml
         
         echo "Prometheus container created and started."
     fi

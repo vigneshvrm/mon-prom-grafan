@@ -15,7 +15,7 @@ class PrometheusConfigManager:
     """Manage Prometheus configuration files"""
     
     def __init__(self, prometheus_config_path: str = '/etc/prometheus/prometheus.yml',
-                 prometheus_reload_api: Optional[str] = None):
+                 prometheus_reload_api: Optional[str] = 'http://localhost:9090/-/reload'):
         """
         Initialize Prometheus Config Manager
         
