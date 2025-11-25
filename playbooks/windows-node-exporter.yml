@@ -1,0 +1,152 @@
+---
+- name: Install Secure Node Exporter on Windows
+  hosts: windows
+  gather_facts: false
+  become: false
+
+  vars:
+    # These will be set from the frontend/CLI
+    target_os: "{{ target_os | default('auto') }}"
+    node_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    prometheus_auto_configure: "{{ prometheus_auto_configure | default(false) }}"
+    
+    windows_exporter_version: "0.25.1"
+    # Map node_exporter_port to windows_exporter_port if not explicitly set
+    windows_exporter_port: "{{ windows_exporter_port | default(node_exporter_port | default('9100')) }}"
+    windows_exporter_install_dir: "C:\\Program Files\\windows_exporter"
+    
+    windows_pkg: "windows_exporter-{{ windows_exporter_version }}-amd64"
+    windows_url: "https://github.com/prometheus-community/windows_exporter/releases/download/v{{ windows_exporter_version }}/{{ windows_pkg }}.msi"
+    windows_installer_path: "C:\\Temp\\windows_exporter.msi"
+
+  tasks:
+    - name: Ensure temp directory exists
+      win_file:
+        path: C:\\Temp
+        state: directory
+
+
+    - name: Check if Windows Exporter is already installed
+      win_service:
+        name: windows_exporter
+      register: windows_exporter_service
+      ignore_errors: true
+
+    - name: Stop Windows Exporter service if running
+      win_service:
+        name: windows_exporter
+        state: stopped
+      when: windows_exporter_service.exists | default(false)
+
+    - name: Download Windows Exporter MSI
+      win_get_url:
+        url: "{{ windows_url }}"
+        dest: "{{ windows_installer_path }}"
+      retries: 3
+      delay: 5
+
+    - name: Install Windows Exporter MSI (silent)
+      win_package:
+        path: "{{ windows_installer_path }}"
+        state: present
+        arguments: '/quiet ENABLE_LISTENER="y" LISTEN_PORT={{ windows_exporter_port }}'
+        product_id: 'windows_exporter'
+
+
+    - name: Configure Windows Exporter service arguments
+      win_service:
+        name: windows_exporter
+        start_mode: auto
+        state: started
+
+    - name: Open port in Windows Firewall
+      win_firewall_rule:
+        name: "Windows Exporter {{ windows_exporter_port }}"
+        localport: "{{ windows_exporter_port }}"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+
+    - name: Wait for Windows Exporter to start
+      win_wait_for:
+        port: "{{ windows_exporter_port }}"
+        timeout: 30
+        delay: 5
+
+    - name: Verify Windows Exporter is running
+      uri:
+        url: "http://localhost:{{ windows_exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+      register: windows_exporter_check
+      retries: 5
+      delay: 3
+      until: windows_exporter_check.status == 200
+      ignore_errors: true
+
+    - name: Get Windows hostname and IP address
+      win_shell: |
+        $hostname = $env:COMPUTERNAME
+        $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*"} | Select-Object -First 1).IPAddress
+        if (-not $ip) { $ip = "127.0.0.1" }
+        Write-Output "{`"hostname`":`"$hostname`",`"ip_address`":`"$ip`"}"
+      register: windows_node_info
+      changed_when: false
+
+    - name: Parse Windows node information
+      set_fact:
+        node_info:
+          hostname: "{{ (windows_node_info.stdout | from_json).hostname }}"
+          fqdn: "{{ (windows_node_info.stdout | from_json).hostname }}"
+          ip_address: "{{ (windows_node_info.stdout | from_json).ip_address }}"
+          port: "{{ windows_exporter_port }}"
+          os: "Windows"
+          instance_label: "{{ (windows_node_info.stdout | from_json).hostname }}-{{ (windows_node_info.stdout | from_json).ip_address }}"
+          scheme: "http"
+          job_name: "windows-exporter"
+
+    - name: Display Windows Exporter status
+      debug:
+        msg:
+          - "Windows Exporter installed successfully!"
+          - "Version: {{ windows_exporter_version }}"
+          - "Port: {{ windows_exporter_port }}"
+          - "Install Directory: {{ windows_exporter_install_dir }}"
+          - "Hostname: {{ node_info.hostname }}"
+          - "IP Address: {{ node_info.ip_address }}"
+          - "Status: {{ 'Running' if windows_exporter_check.status == 200 else 'Check manually' }}"
+
+    - name: Create tmp directory on localhost
+      file:
+        path: "{{ playbook_dir }}/../tmp"
+        state: directory
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+    - name: Save Windows node information for Prometheus configuration
+      copy:
+        content: |
+          {
+            "hostname": "{{ node_info.hostname }}",
+            "fqdn": "{{ node_info.fqdn }}",
+            "ip_address": "{{ node_info.ip_address }}",
+            "port": "{{ node_info.port }}",
+            "os": "{{ node_info.os }}",
+            "instance_label": "{{ node_info.instance_label }}",
+            "scheme": "http",
+            "job_name": "windows-exporter"
+          }
+        dest: "{{ playbook_dir }}/../tmp/node_exporter_info.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+    - name: Clean up installer
+      win_file:
+        path: "{{ windows_installer_path }}"
+        state: absent
+

@@ -1,0 +1,25 @@
+---
+# Node Exporter Configuration Example
+# Copy this file to config.yml and modify as needed
+
+# Target OS: linux, windows, or auto
+target_os: "auto"
+
+# Node Exporter Port
+node_exporter_port: "9100"
+
+# Authentication Credentials
+node_exporter_username: "prometheus"
+node_exporter_password: "changeme"  # Will be hashed automatically
+
+# Certificate Configuration (optional, will be generated if not provided)
+# cert_file: "certs/node_exporter.crt"
+# key_file: "certs/node_exporter.key"
+
+# Hostname and IP for certificate generation
+hostname: "localhost"
+ip_address: "127.0.0.1"
+
+# Ansible Inventory File
+inventory_file: "hosts.yml"
+

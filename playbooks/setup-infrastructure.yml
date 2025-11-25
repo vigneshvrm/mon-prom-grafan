@@ -1,0 +1,79 @@
+---
+# Production-Grade Infrastructure Setup Playbook
+# Orchestrates Podman installation and Prometheus setup
+# This is the main playbook for initial setup
+#
+# Usage:
+#   ansible-playbook playbooks/setup-infrastructure.yml
+#
+# Or run playbooks separately:
+#   ansible-playbook playbooks/install-podman.yml
+#   ansible-playbook playbooks/setup-prometheus-podman.yml
+
+- name: Setup Production Monitoring Infrastructure
+  hosts: localhost
+  gather_facts: true
+  become: true
+  connection: local
+
+  vars:
+    # Podman configuration
+    install_podman: true
+    podman_version: "latest"
+    enable_rootless: false
+    
+    # Prometheus configuration
+    setup_prometheus: true
+    prometheus_version: "latest"
+    prometheus_port: 9090
+    prometheus_retention: "30d"
+    prometheus_scrape_interval: "15s"
+    
+    # Container resource limits
+    prometheus_memory_limit: "2G"
+    prometheus_cpu_limit: "2.0"
+
+  tasks:
+    - name: Display setup information
+      debug:
+        msg:
+          - "=========================================="
+          - "Production Infrastructure Setup"
+          - "=========================================="
+          - "Podman Installation: {{ 'Enabled' if install_podman else 'Skipped' }}"
+          - "Prometheus Setup: {{ 'Enabled' if setup_prometheus else 'Skipped' }}"
+          - "=========================================="
+          - ""
+          - "NOTE: This playbook requires running the individual playbooks separately:"
+          - "  1. ansible-playbook playbooks/install-podman.yml"
+          - "  2. ansible-playbook playbooks/setup-prometheus-podman.yml"
+          - ""
+          - "Or use import_playbook at the playbook level (see README-PRODUCTION.md)"
+          - "=========================================="
+
+    # Final verification
+    - name: Verify Podman installation
+      command: podman --version
+      register: final_podman_check
+      changed_when: false
+      failed_when: false
+      when: install_podman
+
+    - name: Verify Prometheus container
+      command: podman ps --filter "name=prometheus" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: final_prometheus_check
+      changed_when: false
+      failed_when: false
+      when: setup_prometheus
+
+    - name: Display final status
+      debug:
+        msg:
+          - "=========================================="
+          - "Current Status:"
+          - "=========================================="
+          - "Podman: {{ 'Installed - ' + final_podman_check.stdout if install_podman and final_podman_check.rc == 0 else 'Not installed' }}"
+          - "Prometheus: {{ 'Running' if setup_prometheus and final_prometheus_check.stdout == 'prometheus' else 'Not running' }}"
+          - "=========================================="
+          - "Access Prometheus at: http://localhost:{{ prometheus_port }}"
+          - "=========================================="

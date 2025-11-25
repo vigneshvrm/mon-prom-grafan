@@ -1,0 +1,7 @@
+---
+# Main orchestration playbook
+# Routes to appropriate installation playbook based on OS
+
+- import_playbook: linux-node-exporter.yml
+
+- import_playbook: windows-node-exporter.yml

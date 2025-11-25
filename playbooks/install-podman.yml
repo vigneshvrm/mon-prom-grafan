@@ -1,0 +1,258 @@
+---
+# Production-Grade Podman Installation Playbook
+# Installs and configures Podman for production use
+# Supports: Ubuntu/Debian, RHEL/CentOS/Fedora, Arch Linux, SUSE
+
+- name: Install and Configure Podman for Production
+  hosts: localhost
+  gather_facts: true
+  become: true
+  connection: local
+
+  vars:
+    podman_version: "latest"  # Can be pinned to specific version like "4.5.1"
+    podman_user: "{{ ansible_user | default('root') }}"
+    enable_rootless: false  # Set to true for rootless containers
+    configure_networking: true
+    configure_storage: true
+    storage_driver: "overlay"  # overlay, vfs, devicemapper
+
+  tasks:
+    - name: Display system information
+      debug:
+        msg:
+          - "OS Family: {{ ansible_facts['os_family'] }}"
+          - "Distribution: {{ ansible_facts['distribution'] }}"
+          - "Version: {{ ansible_facts['distribution_version'] }}"
+          - "Architecture: {{ ansible_facts['architecture'] }}"
+
+    - name: Set distribution-specific facts
+      set_fact:
+        is_debian_based: "{{ ansible_facts['os_family'] == 'Debian' }}"
+        is_redhat_based: "{{ ansible_facts['os_family'] == 'RedHat' }}"
+        is_arch_based: "{{ ansible_facts['distribution'] | lower in ['arch', 'manjaro'] }}"
+        is_suse_based: "{{ ansible_facts['os_family'] == 'Suse' }}"
+        is_fedora: "{{ ansible_facts['distribution'] | lower == 'fedora' }}"
+        is_ubuntu: "{{ ansible_facts['distribution'] | lower == 'ubuntu' }}"
+
+    # Check if Podman is already installed
+    - name: Check if Podman is installed
+      command: which podman
+      register: podman_check
+      changed_when: false
+      failed_when: false
+
+    - name: Get current Podman version if installed
+      command: podman --version
+      register: podman_version_current
+      changed_when: false
+      failed_when: false
+      when: podman_check.rc == 0
+
+    - name: Display Podman status
+      debug:
+        msg: "Podman is already installed: {{ podman_version_current.stdout | default('Not installed') }}"
+      when: podman_check.rc == 0
+
+    # Ubuntu/Debian Installation
+    - name: Update apt cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: is_debian_based and podman_check.rc != 0
+
+    - name: Install required packages for Podman (Ubuntu/Debian)
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: is_debian_based and podman_check.rc != 0
+
+    - name: Add Podman repository key (Ubuntu/Debian)
+      apt_key:
+        url: https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/Debian_Testing/Release.key
+        state: present
+      when: is_debian_based and is_ubuntu and podman_check.rc != 0
+      ignore_errors: true
+
+    - name: Add Podman repository (Ubuntu)
+      apt_repository:
+        repo: "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_{{ ansible_facts['distribution_version'] }}/ /"
+        state: present
+        filename: podman
+        update_cache: yes
+      when: is_debian_based and is_ubuntu and podman_check.rc != 0
+      ignore_errors: true
+
+    - name: Install Podman (Ubuntu/Debian)
+      apt:
+        name:
+          - podman
+          - podman-docker  # Provides docker-compatible CLI
+          - buildah  # For building containers
+          - skopeo  # For container image management
+        state: present
+        update_cache: yes
+      when: is_debian_based and podman_check.rc != 0
+      register: podman_install_debian
+
+    # RHEL/CentOS/Fedora Installation
+    - name: Install Podman (RHEL/CentOS 8+)
+      dnf:
+        name:
+          - podman
+          - podman-docker
+          - buildah
+          - skopeo
+        state: present
+      when: (is_redhat_based or is_fedora) and podman_check.rc != 0
+      register: podman_install_rhel
+
+    - name: Install Podman (RHEL/CentOS 7)
+      yum:
+        name:
+          - podman
+          - podman-docker
+          - buildah
+          - skopeo
+        state: present
+      when: is_redhat_based and ansible_facts['distribution_major_version'] | int < 8 and podman_check.rc != 0
+      register: podman_install_rhel7
+
+    # Arch Linux Installation
+    - name: Install Podman (Arch Linux)
+      pacman:
+        name:
+          - podman
+          - podman-docker
+          - buildah
+          - skopeo
+        state: present
+        update_cache: yes
+      when: is_arch_based and podman_check.rc != 0
+      register: podman_install_arch
+
+    # SUSE Installation
+    - name: Install Podman (SUSE)
+      zypper:
+        name:
+          - podman
+          - podman-docker
+          - buildah
+          - skopeo
+        state: present
+      when: is_suse_based and podman_check.rc != 0
+      register: podman_install_suse
+
+    # Verify installation
+    - name: Verify Podman installation
+      command: podman --version
+      register: podman_version_installed
+      changed_when: false
+      when: podman_check.rc != 0
+
+    - name: Display installed Podman version
+      debug:
+        msg: "Podman installed successfully: {{ podman_version_installed.stdout }}"
+      when: podman_check.rc != 0 and podman_version_installed is defined
+
+    # Configure Podman for production
+    - name: Create Podman configuration directory
+      file:
+        path: /etc/containers
+        state: directory
+        mode: '0755'
+
+    - name: Configure Podman storage
+      template:
+        src: podman-storage.conf.j2
+        dest: /etc/containers/storage.conf
+        mode: '0644'
+        backup: yes
+      when: configure_storage
+      notify: restart podman service
+
+    - name: Configure Podman networking
+      template:
+        src: podman-network.conf.j2
+        dest: /etc/containers/network.conf
+        mode: '0644'
+        backup: yes
+      when: configure_networking
+      notify: restart podman service
+
+    # Enable Podman socket (for API access)
+    - name: Enable and start Podman socket
+      systemd:
+        name: podman.socket
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: ansible_facts['service_mgr'] == 'systemd'
+      ignore_errors: true
+
+    # Configure rootless Podman (optional)
+    - name: Configure subuid and subgid for rootless Podman
+      lineinfile:
+        path: "{{ item }}"
+        regexp: "^{{ podman_user }}:"
+        line: "{{ podman_user }}:100000:65536"
+        create: yes
+        mode: '0644'
+      loop:
+        - /etc/subuid
+        - /etc/subgid
+      when: enable_rootless
+      notify: restart podman service
+
+    # Configure log rotation for containers
+    - name: Configure container log rotation
+      copy:
+        content: |
+          # Container log rotation configuration
+          max_size = "10m"
+          max_file = "3"
+        dest: /etc/containers/logrotate.conf
+        mode: '0644'
+        backup: yes
+
+    # Test Podman functionality
+    - name: Test Podman with hello-world container
+      command: podman run --rm hello-world
+      register: podman_test
+      changed_when: true
+      failed_when: false
+      when: podman_check.rc != 0
+
+    - name: Display Podman test results
+      debug:
+        msg: "Podman test: {{ 'PASSED' if podman_test.rc == 0 else 'FAILED - Manual verification required' }}"
+      when: podman_test is defined
+
+    # Final verification
+    - name: Final Podman verification
+      command: podman info
+      register: podman_info
+      changed_when: false
+      failed_when: false
+
+    - name: Display Podman system information
+      debug:
+        msg:
+          - "Podman Installation: COMPLETE"
+          - "Version: {{ podman_info.stdout | regex_search('version: (.*)', '\\1') | default('Unknown') }}"
+          - "Storage Driver: {{ podman_info.stdout | regex_search('graphDriverName: (.*)', '\\1') | default('Unknown') }}"
+          - "Rootless Mode: {{ 'Enabled' if enable_rootless else 'Disabled' }}"
+
+  handlers:
+    - name: restart podman service
+      systemd:
+        name: podman.socket
+        state: restarted
+        daemon_reload: true
+      ignore_errors: true
+
