@@ -5,6 +5,23 @@
   become: false
 
   tasks:
+    - name: Test WinRM connectivity first
+      win_ping:
+      register: winrm_ping_test
+      ignore_errors: true
+      failed_when: false
+      vars:
+        ansible_winrm_connection_timeout: 10
+
+    - name: Skip configuration if WinRM is already accessible
+      debug:
+        msg: "WinRM is already configured and accessible. Skipping WinRM configuration playbook."
+      when: winrm_ping_test is succeeded
+
+    - name: End play if WinRM is already working
+      meta: end_play
+      when: winrm_ping_test is succeeded
+
     - name: Check if WinRM is already configured
       win_shell: |
         $winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
@@ -20,10 +37,18 @@
         }
       register: winrm_status
       changed_when: false
+      when: winrm_ping_test is succeeded
+
+    - name: Handle WinRM unreachable case
+      set_fact:
+        winrm_unreachable: true
+        winrm_status_normalized: "unreachable"
+      when: (winrm_ping_test is failed or winrm_ping_test is unreachable) and winrm_ping_test.msg is defined
 
     - name: Normalize WinRM status
       set_fact:
         winrm_status_normalized: "{{ winrm_status.stdout | default('') | trim | lower }}"
+      when: winrm_ping_test is succeeded and winrm_status is defined
 
     - name: Enable WinRM service
       win_service:
@@ -78,10 +103,50 @@
       register: winrm_ping_result
       ignore_errors: true
 
+    - name: Display WinRM unreachable error with detailed instructions
+      fail:
+        msg: |
+          ============================================
+          WinRM is not accessible on {{ inventory_hostname }}:5985
+          ============================================
+          
+          WinRM must be configured on the Windows host BEFORE Ansible can connect.
+          
+          Please run these commands on the Windows host (as Administrator in PowerShell):
+          
+          1. Enable WinRM:
+             winrm quickconfig -force
+          
+          2. Configure Basic Authentication:
+             winrm set winrm/config/service/auth @{Basic="true"}
+             winrm set winrm/config/service @{AllowUnencrypted="true"}
+          
+          3. Configure WinRM Client:
+             winrm set winrm/config/client/auth @{Basic="true"}
+             winrm set winrm/config/client @{AllowUnencrypted="true"}
+          
+          4. Allow WinRM through Windows Firewall:
+             netsh advfirewall firewall add rule name="WinRM HTTP" dir=in action=allow protocol=TCP localport=5985
+          
+          5. Restart WinRM service:
+             Restart-Service WinRM
+          
+          6. Verify WinRM is listening:
+             winrm enumerate winrm/config/Listener
+          
+          After running these commands, try the installation again.
+          
+          Note: If you're behind a firewall, ensure port 5985 is open between
+          the Ansible controller and the Windows host ({{ inventory_hostname }}).
+          
+          Error details: {{ winrm_ping_test.msg | default('Connection timeout') }}
+      when: winrm_unreachable | default(false)
+
     - name: Display WinRM status
       debug:
         msg:
-          - "WinRM Status: {{ winrm_status_normalized | default(winrm_status.stdout) }}"
+          - "WinRM Status: {{ winrm_status_normalized | default('unknown') }}"
           - "WinRM Connectivity: {{ 'OK' if winrm_ping_result is succeeded else 'FAILED - Check firewall and network connectivity' }}"
           - "WinRM is configured and ready for Ansible connections"
+      when: winrm_unreachable | default(false) == false
 

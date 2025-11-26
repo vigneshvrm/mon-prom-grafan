@@ -19,8 +19,9 @@
   import_playbook: linux-node-exporter.yml
   when: (target_os | default('linux') | string | lower) != 'windows'
 
-# Import WinRM configuration for Windows (runs before Windows Exporter)
-- name: Configure WinRM for Windows
+# Import WinRM configuration for Windows (only if WinRM is not accessible)
+# If WinRM is already configured and accessible, this playbook will skip configuration
+- name: Configure WinRM for Windows (if needed)
   import_playbook: configure-winrm.yml
   when: (target_os | default('linux') | string | lower) == 'windows'
 
