@@ -202,6 +202,7 @@ host_key_checking = False
 timeout = 10
 retry_files_enabled = False
 forks = 1
+deprecation_warnings = False
 command_warnings = False
 
 [ssh_connection]
@@ -336,9 +337,23 @@ operation_timeout_sec = 10
         stdout_lines = result.stdout.split('\n') if result.stdout else []
         stderr_lines = result.stderr.split('\n') if result.stderr else []
         
+        # Filter out deprecation warnings from stderr if playbook succeeded
+        # These are warnings, not errors, and shouldn't cause failures
+        if result.returncode == 0:
+            stderr_lines = [line for line in stderr_lines 
+                          if 'DEPRECATION WARNING' not in line.upper() 
+                          and 'deprecation' not in line.lower()]
+        
         # Extract last 50 lines for display
         stdout_display = '\n'.join(stdout_lines[-50:]) if len(stdout_lines) > 50 else result.stdout or ''
-        stderr_display = '\n'.join(stderr_lines[-50:]) if len(stderr_lines) > 50 else result.stderr or ''
+        stderr_display = '\n'.join(stderr_lines[-50:]) if len(stderr_lines) > 50 else '\n'.join(stderr_lines) if stderr_lines else ''
+        
+        # If playbook succeeded but there's only deprecation warnings in stderr, clear it
+        if result.returncode == 0 and stderr_display:
+            # Check if stderr only contains deprecation-related messages
+            stderr_lower = stderr_display.lower()
+            if 'deprecation' in stderr_lower and 'error' not in stderr_lower and 'failed' not in stderr_lower:
+                stderr_display = ''  # Clear stderr if it's only deprecation warnings
         
         return {
             'success': result.returncode == 0,
