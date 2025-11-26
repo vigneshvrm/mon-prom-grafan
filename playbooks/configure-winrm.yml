@@ -21,12 +21,16 @@
       register: winrm_status
       changed_when: false
 
+    - name: Normalize WinRM status
+      set_fact:
+        winrm_status_normalized: "{{ winrm_status.stdout | default('') | trim | lower }}"
+
     - name: Enable WinRM service
       win_service:
         name: WinRM
         start_mode: auto
         state: started
-      when: winrm_status.stdout != "configured"
+      when: winrm_status_normalized != "configured"
 
     - name: Configure WinRM for HTTP (Basic Auth)
       win_shell: |
@@ -48,10 +52,10 @@
         Restart-Service WinRM -Force
         
         Write-Output "WinRM configured successfully"
-      when: winrm_status.stdout != "configured"
+      when: winrm_status_normalized != "configured"
       register: winrm_config_result
 
-    - name: Configure Windows Firewall for WinRM
+    - name: Ensure Windows Firewall allows WinRM (always check)
       win_firewall_rule:
         name: "WinRM HTTP"
         localport: 5985
@@ -60,18 +64,24 @@
         protocol: tcp
         state: present
         enabled: yes
-      when: winrm_status.stdout != "configured"
 
-    - name: Verify WinRM is accessible
+    - name: Verify WinRM is accessible (after configuration)
       win_wait_for:
         port: 5985
         timeout: 30
         delay: 5
-      when: winrm_status.stdout != "configured"
+      when: winrm_status_normalized != "configured"
+      ignore_errors: true
+
+    - name: Test WinRM connectivity (always verify)
+      win_ping:
+      register: winrm_ping_result
+      ignore_errors: true
 
     - name: Display WinRM status
       debug:
         msg:
-          - "WinRM Status: {{ winrm_status.stdout }}"
+          - "WinRM Status: {{ winrm_status_normalized | default(winrm_status.stdout) }}"
+          - "WinRM Connectivity: {{ 'OK' if winrm_ping_result is succeeded else 'FAILED - Check firewall and network connectivity' }}"
           - "WinRM is configured and ready for Ansible connections"
 
