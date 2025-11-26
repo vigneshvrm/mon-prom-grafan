@@ -282,6 +282,7 @@ operation_timeout_sec = 10
             ])
         
         # Run with timeout - much shorter now
+        print(f"Executing Ansible command: {' '.join(cmd)}")
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -290,6 +291,12 @@ operation_timeout_sec = 10
             timeout=600,  # 10 minutes max (should be much faster with timeouts)
             env={**os.environ, 'ANSIBLE_CONFIG': ansible_cfg_path}
         )
+        
+        # Log result for debugging
+        print(f"Ansible return code: {result.returncode}")
+        if result.returncode != 0:
+            print(f"Ansible stdout (last 20 lines):\n{chr(10).join(result.stdout.split(chr(10))[-20:]) if result.stdout else '(empty)'}")
+            print(f"Ansible stderr (last 20 lines):\n{chr(10).join(result.stderr.split(chr(10))[-20:]) if result.stderr else '(empty)'}")
         
         # Clean up ansible.cfg
         if os.path.exists(ansible_cfg_path):
@@ -355,6 +362,36 @@ operation_timeout_sec = 10
             if 'deprecation' in stderr_lower and 'error' not in stderr_lower and 'failed' not in stderr_lower:
                 stderr_display = ''  # Clear stderr if it's only deprecation warnings
         
+        # Extract error message from output if playbook failed
+        error_message = None
+        if result.returncode != 0:
+            # Look for common error patterns in stdout/stderr
+            all_output = (result.stdout or '') + '\n' + (result.stderr or '')
+            output_lines = all_output.split('\n')
+            
+            # Look for "fatal", "failed", "error" lines
+            error_lines = []
+            for line in output_lines:
+                line_lower = line.lower()
+                if any(keyword in line_lower for keyword in ['fatal:', 'failed:', 'error:', 'unreachable:', 'unable to']):
+                    if 'deprecation' not in line_lower:  # Skip deprecation warnings
+                        error_lines.append(line.strip())
+            
+            if error_lines:
+                # Take the last few error lines (most relevant)
+                error_message = ' | '.join(error_lines[-3:])
+            else:
+                # If no specific error found, use last non-empty line from stderr or stdout
+                for line in reversed(output_lines):
+                    line = line.strip()
+                    if line and 'deprecation' not in line.lower():
+                        error_message = line
+                        break
+            
+            # Fallback error message
+            if not error_message:
+                error_message = f'Ansible playbook failed with return code {result.returncode}'
+        
         return {
             'success': result.returncode == 0,
             'stdout': stdout_display,
@@ -362,6 +399,7 @@ operation_timeout_sec = 10
             'stdout_full': result.stdout or '',
             'stderr_full': result.stderr or '',
             'returncode': result.returncode,
+            'error': error_message,  # Add extracted error message
             'prometheus_updated': prometheus_updated,
             'node_info': node_info
         }
