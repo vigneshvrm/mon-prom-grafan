@@ -42,7 +42,9 @@ ensure_system_packages() {
         echo "console-setup console-setup/charmap47 select UTF-8" | sudo debconf-set-selections
         echo "grub-pc grub-pc/install_devices multiselect" | sudo debconf-set-selections
         
-        local packages=(python3 python3-pip python3-venv sshpass npm curl)
+        local packages=(python3 python3-pip python3-venv sshpass curl)
+        # Note: npm is NOT included here - it comes with Node.js 20.x from NodeSource
+        # Installing npm from Ubuntu repos pulls in 100+ unnecessary dependencies
         local missing=()
 
         for pkg in "${packages[@]}"; do
@@ -60,17 +62,27 @@ ensure_system_packages() {
         fi
     else
         echo "Warning: Unsupported package manager."
-        echo "Install manually: python3 python3-pip python3-venv sshpass curl npm"
+        echo "Install manually: python3 python3-pip python3-venv sshpass curl"
+        echo "Node.js 20.x (includes npm) will be installed separately if needed"
     fi
 }
 
 install_nodejs_20() {
     if command -v apt-get &> /dev/null; then
-        echo "Installing Node.js 20.x from NodeSource..."
+        echo "Installing Node.js 20.x from NodeSource (includes npm)..."
         export DEBIAN_FRONTEND=noninteractive
         export NEEDRESTART_MODE=a
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        
+        # Add NodeSource repository (suppress output for cleaner logs)
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E DEBIAN_FRONTEND=noninteractive bash - > /dev/null 2>&1
+        
+        # Install Node.js 20.x (includes npm, minimal dependencies)
         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq nodejs
+        
+        # Verify installation
+        if command -v node &> /dev/null && command -v npm &> /dev/null; then
+            echo "✓ Node.js $(node -v) and npm $(npm -v) installed"
+        fi
     else
         echo "Warning: Automatic Node.js install only supported on apt-based systems."
         echo "Please install Node.js 20.x manually from https://nodejs.org/"
