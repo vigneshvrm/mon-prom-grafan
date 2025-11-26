@@ -112,8 +112,8 @@ install_python_dependencies() {
         "$PIP_BIN" install PyYAML>=6.0 || echo "Warning: PyYAML installation failed"
         "$PIP_BIN" install pywinrm>=0.3.0 || echo "Warning: pywinrm installation failed"
         "$PIP_BIN" install requests>=2.31.0 || echo "Warning: requests installation failed"
-        "$PIP_BIN" install ansible>=7.0.0 || echo "Warning: ansible installation failed"
-        "$PIP_BIN" install ansible-core>=2.14.0 || echo "Warning: ansible-core installation failed"
+        "$PIP_BIN" install "ansible>=6.0.0" || echo "Warning: ansible installation failed"
+        "$PIP_BIN" install "ansible-core>=2.13.0" || echo "Warning: ansible-core installation failed"
     fi
     
     # Verify Ansible is installed
@@ -163,27 +163,47 @@ install_python_dependencies() {
         for package in "${MISSING_PACKAGES[@]}"; do
             case "$package" in
                 "flask")
-                    "$PIP_BIN" install Flask Werkzeug || echo "Error: Failed to install Flask"
+                    echo "Installing Flask and Werkzeug..."
+                    "$PIP_BIN" install --upgrade Flask Werkzeug || {
+                        echo "Error: Failed to install Flask"
+                        exit 1
+                    }
                     ;;
                 "bcrypt")
-                    "$PIP_BIN" install bcrypt || echo "Error: Failed to install bcrypt"
+                    echo "Installing bcrypt..."
+                    "$PIP_BIN" install --upgrade bcrypt || {
+                        echo "Error: Failed to install bcrypt"
+                        exit 1
+                    }
                     ;;
                 "yaml")
-                    "$PIP_BIN" install PyYAML || echo "Error: Failed to install PyYAML"
+                    echo "Installing PyYAML..."
+                    "$PIP_BIN" install --upgrade --ignore-installed PyYAML || {
+                        echo "Error: Failed to install PyYAML"
+                        exit 1
+                    }
                     ;;
                 "requests")
-                    "$PIP_BIN" install requests || echo "Error: Failed to install requests"
+                    echo "Installing requests..."
+                    "$PIP_BIN" install --upgrade requests || {
+                        echo "Error: Failed to install requests"
+                        exit 1
+                    }
                     ;;
             esac
         done
         
-        # Verify again
+        # Verify again - this is critical, fail if still missing
+        echo "Verifying installed packages..."
         for package in "${MISSING_PACKAGES[@]}"; do
             if ! "${PYTHON_BIN}" -c "import ${package}" 2>/dev/null; then
                 echo "Error: ${package} still not available after installation attempt."
+                echo "This is a critical package. Please install manually:"
+                echo "  ${PIP_BIN} install ${package}"
                 exit 1
             fi
         done
+        echo "✓ All missing packages installed successfully"
     fi
     
     # Show installed versions
@@ -270,37 +290,77 @@ if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     # Clean up the status string
     PROM_STATUS=$(echo "$PROM_STATUS" | tail -n 1 | tr -d '\r\n' | xargs)
     
-    if [ -z "$PROM_STATUS" ] || [ "$PROM_STATUS" = "not_running" ]; then
-        PROM_STATUS="not_running"
-        echo "Prometheus is not running. Deploying Prometheus..."
-        if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
-            # Temporarily disable exit on error for this command
-            set +e
-            bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
-            INSTALL_EXIT=$?
-            set -e
-            
-            if [ $INSTALL_EXIT -ne 0 ]; then
-                echo "Warning: Prometheus deployment returned exit code $INSTALL_EXIT"
-                echo "This may be because:"
-                echo "  - Prometheus is already installed as a systemd service"
-                echo "  - Prometheus container is already running"
-                echo "  - Installation failed (check logs above)"
-                echo ""
-                echo "Continuing anyway - you can check status with:"
-                echo "  bash ${SCRIPT_DIR}/scripts/check-prometheus-service.sh"
-                echo "Or deploy manually with:"
-                echo "  bash ${SCRIPT_DIR}/scripts/install-prometheus.sh start"
-            else
-                echo "✓ Prometheus deployment completed"
+    case "$PROM_STATUS" in
+        "podman_container")
+            echo "✓ Prometheus is already running in Podman container"
+            ;;
+        "systemd_service")
+            echo "✓ Prometheus is already running as systemd service"
+            ;;
+        "port_listening")
+            echo "✓ Prometheus is already running (port 9090 is listening)"
+            ;;
+        "not_running"|"")
+            # Check if container exists but is stopped
+            CONTAINER_STOPPED=false
+            if command -v podman &> /dev/null; then
+                if podman ps -a --format "{{.Names}}" 2>/dev/null | grep -q "^prometheus$"; then
+                    CONTAINER_STATUS=$(podman inspect prometheus --format='{{.State.Status}}' 2>/dev/null || echo "")
+                    if [ "$CONTAINER_STATUS" = "exited" ] || [ "$CONTAINER_STATUS" = "stopped" ]; then
+                        echo "Prometheus container exists but is stopped. Starting it..."
+                        if podman start prometheus 2>/dev/null; then
+                            echo "✓ Prometheus container started"
+                            sleep 3
+                            # Verify it's running
+                            if podman ps --format "{{.Names}}" 2>/dev/null | grep -q "^prometheus$"; then
+                                echo "✓ Prometheus is now running"
+                                CONTAINER_STOPPED=true
+                            fi
+                        fi
+                    fi
+                fi
             fi
-        else
-            echo "Error: install-prometheus.sh not found"
-            echo "Continuing without Prometheus deployment..."
-        fi
-    else
-        echo "✓ Prometheus is already running (${PROM_STATUS})"
-    fi
+            
+            # If still not running, deploy fresh
+            if [ "$CONTAINER_STOPPED" = "false" ]; then
+                echo "Prometheus is not running. Deploying Prometheus..."
+                if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
+                    # Temporarily disable exit on error for this command
+                    set +e
+                    bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
+                    INSTALL_EXIT=$?
+                    set -e
+                    
+                    if [ $INSTALL_EXIT -ne 0 ]; then
+                        echo "Warning: Prometheus deployment returned exit code $INSTALL_EXIT"
+                        echo "This may be because:"
+                        echo "  - Prometheus is already installed as a systemd service"
+                        echo "  - Prometheus container is already running"
+                        echo "  - Installation failed (check logs above)"
+                        echo ""
+                        echo "Continuing anyway - you can check status with:"
+                        echo "  bash ${SCRIPT_DIR}/scripts/check-prometheus-service.sh"
+                        echo "Or deploy manually with:"
+                        echo "  bash ${SCRIPT_DIR}/scripts/install-prometheus.sh start"
+                    else
+                        echo "✓ Prometheus deployment completed"
+                    fi
+                else
+                    echo "Error: install-prometheus.sh not found"
+                    echo "Continuing without Prometheus deployment..."
+                fi
+            fi
+            ;;
+        *)
+            echo "Unknown Prometheus status: ${PROM_STATUS}"
+            echo "Attempting to deploy Prometheus..."
+            if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
+                set +e
+                bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
+                set -e
+            fi
+            ;;
+    esac
 else
     echo "Warning: check-prometheus-service.sh not found. Skipping Prometheus check."
 fi
@@ -358,24 +418,61 @@ echo ""
 
 cd "${SCRIPT_DIR}/web-ui"
 
-# Verify Flask is installed in venv
-if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
-    echo "Error: Flask not found in virtual environment."
-    echo "Installing Flask and dependencies..."
-    "${PIP_BIN}" install -r "${SCRIPT_DIR}/requirements.txt" || {
-        echo "Error: Failed to install Python dependencies."
-        exit 1
-    }
-fi
+# Final verification of all critical packages before starting Flask
+echo "Verifying all critical Python packages..."
+CRITICAL_PACKAGES=("flask" "bcrypt" "yaml" "requests")
+MISSING_CRITICAL=()
 
-# Verify Flask is now available
-if ! "${PYTHON_BIN}" -c "import flask" 2>/dev/null; then
-    echo "Error: Flask still not available after installation attempt."
-    echo "Please run manually:"
-    echo "  cd ${SCRIPT_DIR}"
-    echo "  source .venv/bin/activate"
-    echo "  pip install -r requirements.txt"
-    exit 1
+for package in "${CRITICAL_PACKAGES[@]}"; do
+    if ! "${PYTHON_BIN}" -c "import ${package}" 2>/dev/null; then
+        MISSING_CRITICAL+=("${package}")
+    fi
+done
+
+if [ ${#MISSING_CRITICAL[@]} -gt 0 ]; then
+    echo "Error: Missing critical packages: ${MISSING_CRITICAL[*]}"
+    echo "Installing missing packages..."
+    
+    for package in "${MISSING_CRITICAL[@]}"; do
+        case "$package" in
+            "flask")
+                "${PIP_BIN}" install --upgrade Flask Werkzeug || {
+                    echo "Error: Failed to install Flask"
+                    exit 1
+                }
+                ;;
+            "bcrypt")
+                "${PIP_BIN}" install --upgrade bcrypt || {
+                    echo "Error: Failed to install bcrypt"
+                    exit 1
+                }
+                ;;
+            "yaml")
+                "${PIP_BIN}" install --upgrade --ignore-installed PyYAML || {
+                    echo "Error: Failed to install PyYAML"
+                    exit 1
+                }
+                ;;
+            "requests")
+                "${PIP_BIN}" install --upgrade requests || {
+                    echo "Error: Failed to install requests"
+                    exit 1
+                }
+                ;;
+        esac
+    done
+    
+    # Final verification - fail if still missing
+    for package in "${MISSING_CRITICAL[@]}"; do
+        if ! "${PYTHON_BIN}" -c "import ${package}" 2>/dev/null; then
+            echo "Error: ${package} still not available after installation."
+            echo "Please install manually:"
+            echo "  cd ${SCRIPT_DIR}"
+            echo "  source .venv/bin/activate"
+            echo "  pip install ${package}"
+            exit 1
+        fi
+    done
 fi
 
 echo "✓ Flask and dependencies verified"
