@@ -11,8 +11,8 @@
     prometheus_auto_configure: "{{ prometheus_auto_configure | default(false) }}"
     
     windows_exporter_version: "0.25.1"
-    # Map node_exporter_port to windows_exporter_port if not explicitly set
-    windows_exporter_port: "{{ windows_exporter_port | default(node_exporter_port | default('9100')) }}"
+    # Use node_exporter_port if provided, otherwise default to 9100
+    windows_exporter_port: "{{ node_exporter_port | default('9100') }}"
     windows_exporter_install_dir: "C:\\Program Files\\windows_exporter"
     
     windows_pkg: "windows_exporter-{{ windows_exporter_version }}-amd64"
