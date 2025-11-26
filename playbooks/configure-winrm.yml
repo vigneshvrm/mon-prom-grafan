@@ -13,6 +13,26 @@
       vars:
         ansible_winrm_connection_timeout: 10
 
+    - name: Check if authentication failed
+      set_fact:
+        winrm_auth_failed: true
+        winrm_error_type: "authentication"
+        winrm_error_msg: "{{ winrm_ping_test.msg | default('Credentials rejected') }}"
+      when: 
+        - (winrm_ping_test is failed or winrm_ping_test is unreachable)
+        - winrm_ping_test.msg is defined
+        - "'credentials' in (winrm_ping_test.msg | lower)"
+        - "'rejected' in (winrm_ping_test.msg | lower)"
+
+    - name: Check if connection timeout/unreachable
+      set_fact:
+        winrm_unreachable: true
+        winrm_error_type: "connection"
+        winrm_error_msg: "{{ winrm_ping_test.msg | default('Connection timeout') }}"
+      when:
+        - winrm_ping_test is failed or winrm_ping_test is unreachable
+        - winrm_auth_failed | default(false) == false
+
     - name: Skip configuration if WinRM is already accessible
       debug:
         msg: "WinRM is already configured and accessible. Skipping WinRM configuration playbook."
@@ -39,11 +59,14 @@
       changed_when: false
       when: winrm_ping_test is succeeded
 
-    - name: Handle WinRM unreachable case
+    - name: Handle WinRM unreachable case (if not already set)
       set_fact:
         winrm_unreachable: true
         winrm_status_normalized: "unreachable"
-      when: (winrm_ping_test is failed or winrm_ping_test is unreachable) and winrm_ping_test.msg is defined
+      when: 
+        - (winrm_ping_test is failed or winrm_ping_test is unreachable)
+        - winrm_unreachable is not defined
+        - winrm_auth_failed | default(false) == false
 
     - name: Normalize WinRM status
       set_fact:
@@ -103,7 +126,44 @@
       register: winrm_ping_result
       ignore_errors: true
 
-    - name: Display WinRM unreachable error with detailed instructions
+    - name: Display WinRM authentication error with instructions
+      fail:
+        msg: |
+          ============================================
+          WinRM Authentication Failed
+          ============================================
+          
+          The credentials provided were rejected by the Windows host ({{ inventory_hostname }}).
+          
+          Please verify and fix the following:
+          
+          1. **Check Username and Password**:
+             - Ensure the username is correct (e.g., "Administrator" or "DOMAIN\\username")
+             - Verify the password is correct
+             - Try logging in to the Windows host with these credentials manually
+          
+          2. **Enable Basic Authentication on Windows Host** (run as Administrator):
+             winrm set winrm/config/service/auth @{Basic="true"}
+             winrm set winrm/config/service @{AllowUnencrypted="true"}
+          
+          3. **Configure Local Account for WinRM** (if using local account):
+             # For local Administrator account, ensure it's enabled:
+             net user Administrator /active:yes
+          
+          4. **If using Domain Account**, ensure:
+             - Domain credentials are correct
+             - Account is not locked
+             - Account has necessary permissions
+          
+          5. **Test WinRM connection manually** (from Ansible controller):
+             winrm -r:http://{{ inventory_hostname }}:5985/wsman -u:{{ ansible_user }} -p:YOUR_PASSWORD id
+          
+          After fixing the authentication issue, try the installation again.
+          
+          Error: {{ winrm_error_msg | default(winrm_ping_test.msg | default('Unknown error')) }}
+      when: winrm_auth_failed | default(false)
+
+    - name: Display WinRM connection error with instructions
       fail:
         msg: |
           ============================================
@@ -139,8 +199,10 @@
           Note: If you're behind a firewall, ensure port 5985 is open between
           the Ansible controller and the Windows host ({{ inventory_hostname }}).
           
-          Error details: {{ winrm_ping_test.msg | default('Connection timeout') }}
-      when: winrm_unreachable | default(false)
+          Error details: {{ winrm_error_msg | default(winrm_ping_test.msg | default('Connection timeout')) }}
+      when: 
+        - winrm_unreachable | default(false)
+        - winrm_auth_failed | default(false) == false
 
     - name: Display WinRM status
       debug:
