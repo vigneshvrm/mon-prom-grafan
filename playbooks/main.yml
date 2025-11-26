@@ -1,30 +1,30 @@
 ---
 # Main orchestration playbook
 # Routes to appropriate installation playbook based on OS
+# target_os is passed as an extra var from Flask backend (normalized to lowercase)
 
-- name: Route to Linux or Windows installation
+- name: Debug OS routing
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Normalize and determine target OS
-      set_fact:
-        target_os_determined: "{{ (target_os | default('linux') | string | lower) }}"
-    
-    - name: Debug OS determination
+    - name: Show routing information
       debug:
         msg:
-          - "Target OS received: {{ target_os | default('not_set') }}"
-          - "Target OS determined: {{ target_os_determined }}"
-          - "Will route to: {{ 'Windows' if target_os_determined == 'windows' else 'Linux' }}"
+          - "Target OS from extra vars: {{ target_os | default('not_set') }}"
+          - "Will route to: {{ 'Windows' if (target_os | default('linux') | string | lower) == 'windows' else 'Linux' }}"
 
+# Import Linux playbook when target_os is not 'windows'
+# Using target_os directly from extra vars with default fallback
 - name: Install Node Exporter on Linux
   import_playbook: linux-node-exporter.yml
-  when: target_os_determined != 'windows'
+  when: (target_os | default('linux') | string | lower) != 'windows'
 
-- name: Configure WinRM for Windows (must run before Windows Exporter)
+# Import WinRM configuration for Windows (runs before Windows Exporter)
+- name: Configure WinRM for Windows
   import_playbook: configure-winrm.yml
-  when: target_os_determined == 'windows'
+  when: (target_os | default('linux') | string | lower) == 'windows'
 
+# Import Windows playbook
 - name: Install Windows Exporter
   import_playbook: windows-node-exporter.yml
-  when: target_os_determined == 'windows'
+  when: (target_os | default('linux') | string | lower) == 'windows'
