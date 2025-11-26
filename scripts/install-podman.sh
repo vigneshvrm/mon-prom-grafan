@@ -3,6 +3,10 @@
 
 set -e
 
+# Set non-interactive mode if not already set
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
+export NEEDRESTART_MODE="${NEEDRESTART_MODE:-a}"
+
 check_podman() {
     if command -v podman &> /dev/null; then
         return 0
@@ -28,25 +32,25 @@ install_podman_ubuntu() {
     # Step 1: Install curl if not available
     if ! command -v curl &> /dev/null; then
         echo "Installing curl..."
-        sudo apt-get update
-        sudo apt-get install -y curl ca-certificates
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq curl ca-certificates
     fi
     
     # Step 2: Add Podman repository (method that works perfectly)
     echo "Adding Podman repository..."
-    echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/ /" | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+    echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/ /" | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list > /dev/null
     
     # Step 3: Add GPG key (method that works perfectly)
     echo "Adding GPG key..."
-    curl -L "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/Release.key" | sudo apt-key add -
+    curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_${UBUNTU_VERSION}/Release.key" | sudo apt-key add - > /dev/null 2>&1
     
     # Step 4: Update apt cache
     echo "Updating apt cache..."
-    sudo apt update
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt update -qq
     
     # Step 5: Install Podman
     echo "Installing Podman..."
-    sudo apt install -y podman
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt install -y -qq podman
 }
 
 install_podman_centos() {

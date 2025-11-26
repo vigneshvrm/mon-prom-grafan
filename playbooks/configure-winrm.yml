@@ -12,6 +12,8 @@
       failed_when: false
       vars:
         ansible_winrm_connection_timeout: 10
+      # Note: win_ping uses WinRM protocol, NOT ICMP ping
+      # ICMP being disabled on Windows servers does NOT affect WinRM connectivity
 
     - name: Check if authentication failed
       set_fact:
@@ -187,10 +189,36 @@
           # Test WinRM connection locally
           winrs -r:http://localhost:5985/wsman -u:{{ ansible_user }} -p:YOUR_PASSWORD ipconfig
           
+          **CRITICAL: Most Common Issue - LocalAccountTokenFilterPolicy**
+          
+          If you're using a LOCAL Administrator account (not domain), the registry key
+          LocalAccountTokenFilterPolicy MUST be set to 1. Without this, local admin
+          accounts are rejected by WinRM even with correct credentials.
+          
+          Verify it's set correctly:
+          Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LocalAccountTokenFilterPolicy
+          # Should return: LocalAccountTokenFilterPolicy : 1
+          
+          If it's missing or 0, run the script above to set it.
+          
+          **Quick Diagnostic Commands** (run on Windows host):
+          
+          # Check if Basic Auth is enabled
+          winrm get winrm/config/service/auth
+          # Look for: Basic = true
+          
+          # Check LocalAccountTokenFilterPolicy
+          Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LocalAccountTokenFilterPolicy -ErrorAction SilentlyContinue
+          
+          # Check if AllowUnencrypted is true
+          winrm get winrm/config/service
+          # Look for: AllowUnencrypted = true
+          
           **Important Notes:**
           - LocalAccountTokenFilterPolicy is REQUIRED for local administrator accounts
           - AllowUnencrypted must be true when using Basic auth over HTTP (port 5985)
           - After making changes, wait 10-15 seconds before retrying the Ansible connection
+          - If using domain account, ensure account is not locked and has proper permissions
           
           Reference: https://docs.ansible.com/projects/ansible/latest/os_guide/windows_winrm.html
           
@@ -258,6 +286,11 @@
           - Verify port 5985 is open: Test-NetConnection -ComputerName {{ inventory_hostname }} -Port 5985
           - Check firewall rules: Get-NetFirewallRule -DisplayName "*WinRM*"
           - Verify WinRM service is running: Get-Service WinRM
+          - Note: ICMP (ping) is NOT required for WinRM - WinRM uses TCP port 5985
+          
+          **If you need to enable ICMP for other purposes** (optional, not required for WinRM):
+          # Allow ICMP Echo Request (ping) through firewall
+          New-NetFirewallRule -DisplayName "ICMP Echo Request" -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow
           
           Reference: https://docs.ansible.com/projects/ansible/latest/os_guide/windows_winrm.html
           

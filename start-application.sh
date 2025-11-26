@@ -4,6 +4,12 @@
 # Don't exit on error - we handle errors explicitly
 set +e
 
+# Set environment variables to prevent ALL interactive prompts
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export UCF_FORCE_CONFFNEW=1
+export APT_LISTCHANGES_FRONTEND=none
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
@@ -19,15 +25,22 @@ echo ""
 
 ensure_system_packages() {
     if command -v apt-get &> /dev/null; then
+        # Prevent ALL interactive prompts during package installation
+        export DEBIAN_FRONTEND=noninteractive
+        export NEEDRESTART_MODE=a
+        
         # Prevent interactive prompts during package installation
         if ! command -v debconf-set-selections &> /dev/null; then
             echo "Installing debconf-utils to prevent interactive prompts..."
-            sudo apt-get update
-            sudo apt-get install -y debconf-utils
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq debconf-utils
         fi
         
-        # Configure debconf to avoid hanging on service restart prompts
+        # Configure debconf to avoid ALL service restart prompts and other interactive dialogs
         echo "* libraries/restart-without-asking boolean true" | sudo debconf-set-selections
+        echo "debconf debconf/frontend select noninteractive" | sudo debconf-set-selections
+        echo "console-setup console-setup/charmap47 select UTF-8" | sudo debconf-set-selections
+        echo "grub-pc grub-pc/install_devices multiselect" | sudo debconf-set-selections
         
         local packages=(python3 python3-pip python3-venv sshpass npm curl)
         local missing=()
@@ -40,8 +53,8 @@ ensure_system_packages() {
 
         if [ ${#missing[@]} -gt 0 ]; then
             echo "Installing system packages: ${missing[*]}"
-            sudo apt-get update
-            sudo apt-get install -y "${missing[@]}"
+            sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq "${missing[@]}"
         else
             echo "✓ System packages already installed."
         fi
@@ -54,8 +67,10 @@ ensure_system_packages() {
 install_nodejs_20() {
     if command -v apt-get &> /dev/null; then
         echo "Installing Node.js 20.x from NodeSource..."
+        export DEBIAN_FRONTEND=noninteractive
+        export NEEDRESTART_MODE=a
         curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt-get install -y nodejs
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq nodejs
     else
         echo "Warning: Automatic Node.js install only supported on apt-based systems."
         echo "Please install Node.js 20.x manually from https://nodejs.org/"
@@ -269,7 +284,8 @@ echo "[3/7] Checking Podman installation..."
 if ! command -v podman &> /dev/null; then
     echo "Podman is not installed. Installing..."
     if [ -f "${SCRIPT_DIR}/scripts/install-podman.sh" ]; then
-        bash "${SCRIPT_DIR}/scripts/install-podman.sh"
+        # Pass non-interactive environment to child script
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a bash "${SCRIPT_DIR}/scripts/install-podman.sh"
     else
         echo "Error: install-podman.sh not found"
         exit 1
@@ -327,7 +343,7 @@ if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
                 if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
                     # Temporarily disable exit on error for this command
                     set +e
-                    bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
+                    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
                     INSTALL_EXIT=$?
                     set -e
                     
@@ -356,7 +372,7 @@ if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
             echo "Attempting to deploy Prometheus..."
             if [ -f "${SCRIPT_DIR}/scripts/install-prometheus.sh" ]; then
                 set +e
-                bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
+                DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a bash "${SCRIPT_DIR}/scripts/install-prometheus.sh" start
                 set -e
             fi
             ;;
