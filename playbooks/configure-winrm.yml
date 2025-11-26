@@ -133,32 +133,66 @@
           WinRM Authentication Failed
           ============================================
           
-          The credentials provided were rejected by the Windows host ({{ inventory_hostname }}).
+          The credentials work for RDP but are rejected by WinRM on {{ inventory_hostname }}.
+          Follow the official Ansible WinRM setup guide to configure WinRM properly.
           
-          Please verify and fix the following:
+          **Run this PowerShell script on the Windows host (as Administrator):**
           
-          1. **Check Username and Password**:
-             - Ensure the username is correct (e.g., "Administrator" or "DOMAIN\\username")
-             - Verify the password is correct
-             - Try logging in to the Windows host with these credentials manually
+          # Complete WinRM setup (from Ansible documentation)
+          # Enables the WinRM service and sets up the HTTP listener
+          Enable-PSRemoting -Force
           
-          2. **Enable Basic Authentication on Windows Host** (run as Administrator):
-             winrm set winrm/config/service/auth @{Basic="true"}
-             winrm set winrm/config/service @{AllowUnencrypted="true"}
+          # Opens port 5985 for all profiles
+          $firewallParams = @{
+              Action      = 'Allow'
+              Description = 'Inbound rule for Windows Remote Management via WS-Management. [TCP 5985]'
+              Direction   = 'Inbound'
+              DisplayName = 'Windows Remote Management (HTTP-In)'
+              LocalPort   = 5985
+              Profile     = 'Any'
+              Protocol    = 'TCP'
+          }
+          New-NetFirewallRule @firewallParams
           
-          3. **Configure Local Account for WinRM** (if using local account):
-             # For local Administrator account, ensure it's enabled:
-             net user Administrator /active:yes
+          # Allows local user accounts to be used with WinRM (REQUIRED for local admin)
+          $tokenFilterParams = @{
+              Path         = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+              Name         = 'LocalAccountTokenFilterPolicy'
+              Value        = 1
+              PropertyType = 'DWORD'
+              Force        = $true
+          }
+          New-ItemProperty @tokenFilterParams
           
-          4. **If using Domain Account**, ensure:
-             - Domain credentials are correct
-             - Account is not locked
-             - Account has necessary permissions
+          # Enable Basic Authentication and allow unencrypted (required for Basic over HTTP)
+          winrm set winrm/config/service/auth @{Basic="true"}
+          winrm set winrm/config/service @{AllowUnencrypted="true"}
           
-          5. **Test WinRM connection manually** (from Ansible controller):
-             winrm -r:http://{{ inventory_hostname }}:5985/wsman -u:{{ ansible_user }} -p:YOUR_PASSWORD id
+          # Configure WinRM Client
+          winrm set winrm/config/client/auth @{Basic="true"}
+          winrm set winrm/config/client @{AllowUnencrypted="true"}
           
-          After fixing the authentication issue, try the installation again.
+          # Restart WinRM service
+          Restart-Service WinRM
+          
+          **Verify the configuration:**
+          
+          # Check WinRM listener
+          winrm enumerate winrm/config/Listener
+          
+          # Check authentication settings
+          winrm get winrm/config/service/auth
+          # Should show: Basic = true
+          
+          # Test WinRM connection locally
+          winrs -r:http://localhost:5985/wsman -u:{{ ansible_user }} -p:YOUR_PASSWORD ipconfig
+          
+          **Important Notes:**
+          - LocalAccountTokenFilterPolicy is REQUIRED for local administrator accounts
+          - AllowUnencrypted must be true when using Basic auth over HTTP (port 5985)
+          - After making changes, wait 10-15 seconds before retrying the Ansible connection
+          
+          Reference: https://docs.ansible.com/projects/ansible/latest/os_guide/windows_winrm.html
           
           Error: {{ winrm_error_msg | default(winrm_ping_test.msg | default('Unknown error')) }}
       when: winrm_auth_failed | default(false)
@@ -171,33 +205,61 @@
           ============================================
           
           WinRM must be configured on the Windows host BEFORE Ansible can connect.
+          Follow the official Ansible WinRM setup guide.
           
-          Please run these commands on the Windows host (as Administrator in PowerShell):
+          **Run this PowerShell script on the Windows host (as Administrator):**
           
-          1. Enable WinRM:
-             winrm quickconfig -force
+          # Complete WinRM setup (from Ansible documentation)
+          # Enables the WinRM service and sets up the HTTP listener
+          Enable-PSRemoting -Force
           
-          2. Configure Basic Authentication:
-             winrm set winrm/config/service/auth @{Basic="true"}
-             winrm set winrm/config/service @{AllowUnencrypted="true"}
+          # Opens port 5985 for all profiles
+          $firewallParams = @{
+              Action      = 'Allow'
+              Description = 'Inbound rule for Windows Remote Management via WS-Management. [TCP 5985]'
+              Direction   = 'Inbound'
+              DisplayName = 'Windows Remote Management (HTTP-In)'
+              LocalPort   = 5985
+              Profile     = 'Any'
+              Protocol    = 'TCP'
+          }
+          New-NetFirewallRule @firewallParams
           
-          3. Configure WinRM Client:
-             winrm set winrm/config/client/auth @{Basic="true"}
-             winrm set winrm/config/client @{AllowUnencrypted="true"}
+          # Allows local user accounts to be used with WinRM (REQUIRED for local admin)
+          $tokenFilterParams = @{
+              Path         = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+              Name         = 'LocalAccountTokenFilterPolicy'
+              Value        = 1
+              PropertyType = 'DWORD'
+              Force        = $true
+          }
+          New-ItemProperty @tokenFilterParams
           
-          4. Allow WinRM through Windows Firewall:
-             netsh advfirewall firewall add rule name="WinRM HTTP" dir=in action=allow protocol=TCP localport=5985
+          # Enable Basic Authentication and allow unencrypted (required for Basic over HTTP)
+          winrm set winrm/config/service/auth @{Basic="true"}
+          winrm set winrm/config/service @{AllowUnencrypted="true"}
           
-          5. Restart WinRM service:
-             Restart-Service WinRM
+          # Configure WinRM Client
+          winrm set winrm/config/client/auth @{Basic="true"}
+          winrm set winrm/config/client @{AllowUnencrypted="true"}
           
-          6. Verify WinRM is listening:
-             winrm enumerate winrm/config/Listener
+          # Restart WinRM service
+          Restart-Service WinRM
           
-          After running these commands, try the installation again.
+          **Verify the configuration:**
           
-          Note: If you're behind a firewall, ensure port 5985 is open between
-          the Ansible controller and the Windows host ({{ inventory_hostname }}).
+          # Check WinRM listener
+          winrm enumerate winrm/config/Listener
+          
+          # Test connection from another Windows host (if available)
+          winrs -r:http://{{ inventory_hostname }}:5985/wsman -u:{{ ansible_user }} -p:YOUR_PASSWORD ipconfig
+          
+          **Troubleshooting:**
+          - Verify port 5985 is open: Test-NetConnection -ComputerName {{ inventory_hostname }} -Port 5985
+          - Check firewall rules: Get-NetFirewallRule -DisplayName "*WinRM*"
+          - Verify WinRM service is running: Get-Service WinRM
+          
+          Reference: https://docs.ansible.com/projects/ansible/latest/os_guide/windows_winrm.html
           
           Error details: {{ winrm_error_msg | default(winrm_ping_test.msg | default('Connection timeout')) }}
       when: 
