@@ -275,6 +275,8 @@
       when: configure_firewall | bool and ufw_result is defined
 
     # Fallback: iptables direct configuration (if no firewall manager is active)
+    # Only use iptables if firewalld and ufw were not attempted or were skipped
+    # Note: We check if tasks were skipped, not if they failed (because failed_when: false)
     - name: Check if iptables rule already exists
       command: iptables -C INPUT -p tcp --dport {{ node_exporter_port }} -j ACCEPT
       register: iptables_check_existing
@@ -282,8 +284,8 @@
       failed_when: false
       when: 
         - configure_firewall | bool
-        - firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed)
-        - ufw_result is not defined or (ufw_result is defined and ufw_result.failed)
+        - firewalld_result is not defined or firewalld_result is skipped
+        - ufw_result is not defined or ufw_result is skipped
 
     - name: Add iptables rule for Node Exporter port (if not exists)
       command: iptables -I INPUT 1 -p tcp --dport {{ node_exporter_port }} -j ACCEPT -m comment --comment "Node Exporter metrics port"
@@ -291,8 +293,8 @@
       when:
         - configure_firewall | bool
         - iptables_check_existing.rc != 0
-        - firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed)
-        - ufw_result is not defined or (ufw_result is defined and ufw_result.failed)
+        - firewalld_result is not defined or firewalld_result is skipped
+        - ufw_result is not defined or ufw_result is skipped
       failed_when: false
 
     - name: Save iptables rules (if iptables-save is available)
@@ -330,9 +332,9 @@
           - "To skip firewall configuration, set configure_firewall=false"
       when: 
         - configure_firewall | bool
-        - (firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed))
-        - (ufw_result is not defined or (ufw_result is defined and ufw_result.failed))
-        - (iptables_result is not defined or (iptables_result is defined and iptables_result.failed))
+        - (firewalld_result is not defined or firewalld_result is skipped)
+        - (ufw_result is not defined or ufw_result is skipped)
+        - (iptables_result is not defined or iptables_result is skipped or (iptables_result.rc is defined and iptables_result.rc != 0))
     
     - name: Inform that firewall configuration was skipped (when disabled)
       debug:
