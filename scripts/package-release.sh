@@ -98,6 +98,19 @@ pip install --upgrade pip
 pip install -r "${INSTALL_DIR}/requirements.txt"
 deactivate
 
+echo "[*] Deploying Prometheus (Podman) via Ansible..."
+(
+  cd "${INSTALL_DIR}"
+  source "${INSTALL_DIR}/.venv/bin/activate"
+  ansible-playbook -i localhost, -c local playbooks/setup-prometheus-podman.yml
+  deactivate
+)
+
+echo "[*] Ensuring Prometheus container systemd unit is enabled..."
+if systemctl list-unit-files | grep -q "container-prometheus.service"; then
+  systemctl enable --now container-prometheus.service || true
+fi
+
 echo "[*] Writing systemd service..."
 cat <<SERVICE >/etc/systemd/system/${SERVICE_NAME}
 [Unit]

@@ -41,6 +41,36 @@ Access:
 - **Web UI**: http://localhost:5000 (Modern React UI)
 - **Prometheus UI**: http://localhost:9090
 
+## Packaging for Distribution
+
+To build a self-contained release archive that clients can install with a single script:
+
+1. Run the packaging helper (requires `npm`, `python3`, `tar`):
+   ```bash
+   cd Monitoring
+   bash scripts/package-release.sh
+   ```
+   This produces `dist/opsmonitor-<timestamp>.tar.gz` containing the backend, compiled React UI, Ansible playbooks, helper scripts, and an `INSTALL.sh`.
+
+2. On the client host:
+   ```bash
+   tar -xzf opsmonitor-<timestamp>.tar.gz
+   cd opsmonitor-<timestamp>
+   sudo ./INSTALL.sh
+   ```
+   The installer:
+   - Installs Python/podman prerequisites (apt/yum)
+   - Deploys the app into `/opt/opsmonitor`
+   - Creates a Python virtualenv and installs `requirements.txt`
+   - Runs the `playbooks/setup-prometheus-podman.yml` playbook locally (via Ansible) to pull the Prometheus image, start the Podman container, and generate/enable the `container-prometheus.service`
+   - Registers `opsmonitor.service` with systemd and starts it
+
+After installation, check the service with:
+```bash
+sudo systemctl status opsmonitor.service
+podman ps                           # should list the prometheus container
+```
+
 ## Automatic Dependencies
 
 `start-application.sh` installs all required dependencies automatically:
