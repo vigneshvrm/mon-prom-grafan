@@ -45,11 +45,21 @@ def set_security_headers(response):
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     
     # Only add CSP to HTML responses (not API or static assets)
-    # CSP needs to allow React/Vite inline scripts and styles
+    # CSP needs to allow React/Vite inline scripts and styles, plus external CDNs
     if not request.path.startswith('/api/') and not request.path.startswith('/assets/'):
-        # Relaxed CSP for React to work - allows inline scripts/styles needed by Vite/React
-        # In production, consider tightening this
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*;"
+        # Relaxed CSP for React to work - allows:
+        # - Inline scripts/styles needed by Vite/React
+        # - Tailwind CSS CDN (cdn.tailwindcss.com)
+        # - Google Fonts (fonts.googleapis.com, fonts.gstatic.com)
+        # In production, consider tightening this or using nonces
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' http://localhost:* ws://localhost:*;"
+        )
     
     # HSTS only for HTTPS (skip for HTTP to avoid issues)
     # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
