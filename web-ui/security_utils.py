@@ -183,20 +183,29 @@ def sanitize_path(path: str, base_dir: str) -> Optional[str]:
     # Remove leading/trailing whitespace
     path = path.strip()
     
+    # Normalize path separators (handle both / and \)
+    path = path.replace('\\', '/')
+    
+    # Remove leading slashes to make it relative
+    path = path.lstrip('/')
+    
+    # Check for path traversal attempts - reject if contains ..
+    if '..' in path:
+        return None
+    
     # Resolve to absolute path
     abs_base = os.path.abspath(base_dir)
     abs_path = os.path.abspath(os.path.join(base_dir, path))
     
     # Ensure the resolved path is within base_dir
-    if not abs_path.startswith(abs_base):
-        return None
-    
-    # Check for path traversal attempts
-    if '..' in path or path.startswith('/'):
-        # If it's a relative path with .., it should have been caught above
-        # But double-check
-        if not abs_path.startswith(abs_base):
+    # Use os.path.commonpath for better cross-platform support
+    try:
+        common_path = os.path.commonpath([abs_base, abs_path])
+        if common_path != abs_base:
             return None
+    except ValueError:
+        # Paths on different drives (Windows) or invalid
+        return None
     
     return abs_path
 

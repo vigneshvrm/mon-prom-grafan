@@ -38,12 +38,22 @@ app.config['SECRET_KEY'] = os.urandom(24)
 @app.after_request
 def set_security_headers(response):
     """Add security headers to all responses"""
+    # Add basic security headers to all responses
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    
+    # Only add CSP to HTML responses (not API or static assets)
+    # CSP needs to allow React/Vite inline scripts and styles
+    if not request.path.startswith('/api/') and not request.path.startswith('/assets/'):
+        # Relaxed CSP for React to work - allows inline scripts/styles needed by Vite/React
+        # In production, consider tightening this
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*;"
+    
+    # HSTS only for HTTPS (skip for HTTP to avoid issues)
+    # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    
     return response
 
 # SECURITY: Simple rate limiting decorator (basic implementation)
@@ -681,24 +691,36 @@ def serve_react_app(path):
     """
     Serve React application
     SECURITY: Path is validated to prevent path traversal attacks
+    Flask's send_from_directory already handles path traversal securely
     """
     # Serve React build files
     static_dir = os.path.join(os.path.dirname(__file__), 'static')
     
-    # SECURITY: Validate and sanitize path to prevent path traversal
+    # SECURITY: Basic validation - reject obvious path traversal attempts
     if path:
-        sanitized_path = sanitize_path(path, static_dir)
-        if not sanitized_path:
+        # Reject paths with .. (path traversal)
+        if '..' in path:
             app.logger.warning(f"Path traversal attempt blocked: {path}")
             return jsonify({'error': 'Invalid path'}), 400
         
-        # Check if file exists and is within static_dir
-        if os.path.exists(sanitized_path) and os.path.isfile(sanitized_path):
-            # Get relative path for send_from_directory
-            rel_path = os.path.relpath(sanitized_path, static_dir)
-            return send_from_directory(static_dir, rel_path)
+        # Use Flask's send_from_directory which securely handles path traversal
+        # It automatically prevents access outside the specified directory
+        try:
+            # Check if file exists before trying to serve
+            file_path = os.path.join(static_dir, path)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                # Verify it's actually within static_dir (double-check for security)
+                abs_static = os.path.abspath(static_dir)
+                abs_file = os.path.abspath(file_path)
+                if abs_file.startswith(abs_static):
+                    # Flask's send_from_directory is secure - use it directly
+                    return send_from_directory(static_dir, path)
+        except Exception as e:
+            app.logger.debug(f"Could not serve static file {path}: {e}")
+            # Fall through to serve index.html for SPA routing
     
-    # Otherwise serve index.html for React Router
+    # Otherwise serve index.html for React Router (SPA routing)
+    # This handles all non-file routes for client-side routing
     index_path = os.path.join(static_dir, 'index.html')
     if os.path.exists(index_path):
         return send_from_directory(static_dir, 'index.html')
