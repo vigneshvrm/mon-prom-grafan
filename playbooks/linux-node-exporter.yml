@@ -219,7 +219,7 @@
         state: enabled
         immediate: true
       register: firewalld_result
-      when: 
+      when:
         - configure_firewall | bool
         - ansible_facts['os_family'] in ['RedHat', 'Suse']
         - firewalld_running.rc == 0
