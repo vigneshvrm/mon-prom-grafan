@@ -276,7 +276,18 @@
 
     # Fallback: iptables direct configuration (if no firewall manager is active)
     # Only use iptables if firewalld and ufw were not attempted or were skipped
-    # Note: We check if tasks were skipped, not if they failed (because failed_when: false)
+    # Check if iptables command is available
+    - name: Check if iptables command is available
+      command: which iptables
+      register: iptables_available
+      changed_when: false
+      failed_when: false
+      when: 
+        - configure_firewall | bool
+        - firewalld_result is not defined or firewalld_result is skipped
+        - ufw_result is not defined or ufw_result is skipped
+
+    # Check if iptables rule already exists (only if iptables is available)
     - name: Check if iptables rule already exists
       command: iptables -C INPUT -p tcp --dport {{ node_exporter_port }} -j ACCEPT
       register: iptables_check_existing
@@ -286,15 +297,17 @@
         - configure_firewall | bool
         - firewalld_result is not defined or firewalld_result is skipped
         - ufw_result is not defined or ufw_result is skipped
+        - iptables_available.rc == 0
 
     - name: Add iptables rule for Node Exporter port (if not exists)
       command: iptables -I INPUT 1 -p tcp --dport {{ node_exporter_port }} -j ACCEPT -m comment --comment "Node Exporter metrics port"
       register: iptables_result
       when:
         - configure_firewall | bool
-        - iptables_check_existing.rc != 0
         - firewalld_result is not defined or firewalld_result is skipped
         - ufw_result is not defined or ufw_result is skipped
+        - iptables_available.rc == 0
+        - iptables_check_existing is not defined or iptables_check_existing is skipped or (iptables_check_existing.rc is defined and iptables_check_existing.rc != 0)
       failed_when: false
 
     - name: Save iptables rules (if iptables-save is available)
@@ -303,6 +316,8 @@
       when:
         - configure_firewall | bool
         - iptables_result is defined
+        - iptables_result is not skipped
+        - iptables_result.rc is defined
         - iptables_result.rc == 0
         - ansible_facts['os_family'] == 'Debian'
       failed_when: false
@@ -314,6 +329,8 @@
       when:
         - configure_firewall | bool
         - iptables_result is defined
+        - iptables_result is not skipped
+        - iptables_result.rc is defined
         - iptables_result.rc == 0
         - ansible_facts['os_family'] == 'RedHat'
       failed_when: false
@@ -321,8 +338,17 @@
 
     - name: Display iptables configuration result
       debug:
-        msg: "iptables rule for port {{ node_exporter_port }}/tcp {{ 'configured successfully' if iptables_result is defined and iptables_result.rc == 0 else 'may already exist or iptables is not available' }}"
+        msg: "iptables rule for port {{ node_exporter_port }}/tcp {{ 'configured successfully' if iptables_result is defined and iptables_result is not skipped and iptables_result.rc is defined and iptables_result.rc == 0 else 'may already exist or iptables is not available' }}"
       when: configure_firewall | bool and iptables_result is defined
+
+    - name: Inform if iptables is not available (when firewall configuration is enabled)
+      debug:
+        msg: "iptables command is not available. Skipping iptables firewall configuration. Please ensure iptables is installed if you need direct iptables rules."
+      when: 
+        - configure_firewall | bool
+        - firewalld_result is not defined or firewalld_result is skipped
+        - ufw_result is not defined or ufw_result is skipped
+        - iptables_available.rc != 0
 
     - name: Warning if firewall configuration failed (when enabled)
       debug:
