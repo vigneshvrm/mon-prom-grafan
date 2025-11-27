@@ -484,7 +484,8 @@ else
         # Set permissions so the application user can write
         sudo chmod 755 /var/log
         sudo touch /var/log/monitoring-app.log
-        sudo chmod 666 /var/log/monitoring-app.log 2>/dev/null || sudo chmod 644 /var/log/monitoring-app.log
+        # SECURITY: Use secure file permissions (644 = rw-r--r--)
+        sudo chmod 644 /var/log/monitoring-app.log 2>/dev/null || echo "Warning: Could not set log file permissions"
         echo "Created log directory with sudo: ${LOG_DIR}"
     else
         LOG_DIR="${SCRIPT_DIR}/web-ui/logs"

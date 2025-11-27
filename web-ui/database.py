@@ -146,8 +146,17 @@ class ServerDatabase:
         if not row:
             return None
         
-        # Convert row to dictionary
-        metrics = json.loads(row[7]) if row[7] else {'cpu': [], 'memory': [], 'timestamps': []}
+        # SECURITY: Validate JSON size before parsing
+        metrics_json = row[7] if row[7] else None
+        if metrics_json and len(metrics_json) > 10 * 1024 * 1024:  # 10MB limit
+            logger.warning(f"Metrics JSON too large for server {server_id}: {len(metrics_json)} bytes")
+            metrics = {'cpu': [], 'memory': [], 'timestamps': []}
+        else:
+            try:
+                metrics = json.loads(metrics_json) if metrics_json else {'cpu': [], 'memory': [], 'timestamps': []}
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Invalid JSON in metrics for server {server_id}: {e}")
+                metrics = {'cpu': [], 'memory': [], 'timestamps': []}
         
         return {
             'id': row[0],
@@ -192,7 +201,17 @@ class ServerDatabase:
             logger.debug(f"Retrieved {len(rows)} servers from database")
         servers = []
         for row in rows:
-            metrics = json.loads(row[7]) if row[7] else {'cpu': [], 'memory': [], 'timestamps': []}
+            # SECURITY: Validate JSON size before parsing
+            metrics_json = row[7] if row[7] else None
+            if metrics_json and len(metrics_json) > 10 * 1024 * 1024:  # 10MB limit
+                logger.warning(f"Metrics JSON too large for server {row[0]}: {len(metrics_json)} bytes")
+                metrics = {'cpu': [], 'memory': [], 'timestamps': []}
+            else:
+                try:
+                    metrics = json.loads(metrics_json) if metrics_json else {'cpu': [], 'memory': [], 'timestamps': []}
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Invalid JSON in metrics for server {row[0]}: {e}")
+                    metrics = {'cpu': [], 'memory': [], 'timestamps': []}
             servers.append({
                 'id': row[0],
                 'name': row[1],

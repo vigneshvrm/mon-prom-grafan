@@ -12,21 +12,75 @@ import sys
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, after_this_request
 from werkzeug.utils import secure_filename
 import bcrypt
 import yaml
+from functools import wraps
 
 # Add parent directory (Monitoring) to path for prometheus_manager import
 monitoring_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, monitoring_dir)
 from prometheus.prometheus_manager import PrometheusConfigManager
 from database import get_database
+from security_utils import (
+    validate_ip_address, validate_port, sanitize_hostname, sanitize_username,
+    sanitize_server_name, sanitize_server_id, sanitize_path, escape_ansible_value,
+    validate_install_request
+)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SECRET_KEY'] = os.urandom(24)
+
+# SECURITY: Add security headers to all responses
+@app.after_request
+def set_security_headers(response):
+    """Add security headers to all responses"""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
+# SECURITY: Simple rate limiting decorator (basic implementation)
+# For production, use Flask-Limiter
+_rate_limit_store = {}
+_rate_limit_window = 60  # 60 seconds
+_rate_limit_max_requests = 100  # 100 requests per window
+
+def rate_limit(f):
+    """Simple rate limiting decorator"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        client_ip = request.remote_addr
+        current_time = datetime.now().timestamp()
+        
+        # Clean old entries
+        if client_ip in _rate_limit_store:
+            _rate_limit_store[client_ip] = [
+                req_time for req_time in _rate_limit_store[client_ip]
+                if current_time - req_time < _rate_limit_window
+            ]
+        else:
+            _rate_limit_store[client_ip] = []
+        
+        # Check rate limit
+        if len(_rate_limit_store[client_ip]) >= _rate_limit_max_requests:
+            app.logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+            return jsonify({
+                'success': False,
+                'error': 'Rate limit exceeded. Please try again later.'
+            }), 429
+        
+        # Add current request
+        _rate_limit_store[client_ip].append(current_time)
+        
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Ensure upload and certs directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -234,28 +288,53 @@ def create_ansible_config(config_data):
     return extra_vars
 
 def create_dynamic_inventory(target_host, target_username, target_password, os_type, monitoring_dir):
-    """Create a temporary inventory file for a single host"""
+    """
+    Create a temporary inventory file for a single host
+    SECURITY: All inputs are validated and sanitized to prevent command injection
+    """
     import tempfile
+    
+    # SECURITY: Validate and sanitize inputs
+    sanitized_host = sanitize_hostname(target_host)
+    if not sanitized_host:
+        raise ValueError(f"Invalid target_host format: {target_host}")
+    
+    sanitized_user = sanitize_username(target_username)
+    if not sanitized_user:
+        raise ValueError(f"Invalid username format: {target_username}")
+    
+    # Password doesn't need sanitization for Ansible (it's used as-is in inventory)
+    # But we'll escape it to be safe
+    escaped_password = escape_ansible_value(target_password) if target_password else '""'
     
     # Determine connection type based on OS (normalize to lowercase)
     os_type = os_type.lower() if os_type else 'linux'
+    
+    # SECURITY: Use escaped values to prevent injection
+    escaped_host = escape_ansible_value(sanitized_host)
+    escaped_user = escape_ansible_value(sanitized_user)
     
     if os_type == 'windows':
         # Windows uses WinRM on port 5985 (HTTP) or 5986 (HTTPS)
         # Use port 5985 for basic auth (simpler setup)
         # Extended timeouts for WinRM operations
         inventory_content = f"""[windows]
-{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_connection=winrm ansible_port=5985 ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore ansible_become=false ansible_winrm_read_timeout_sec=60 ansible_winrm_operation_timeout_sec=60 ansible_winrm_connection_timeout=30
+{escaped_host} ansible_host={escaped_host} ansible_user={escaped_user} ansible_password={escaped_password} ansible_connection=winrm ansible_port=5985 ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore ansible_become=false ansible_winrm_read_timeout_sec=60 ansible_winrm_operation_timeout_sec=60 ansible_winrm_connection_timeout=30
 """
     else:  # linux or auto (default to linux)
         inventory_content = f"""[linux]
-{target_host} ansible_host={target_host} ansible_user={target_username} ansible_password={target_password} ansible_become=true ansible_become_pass={target_password} ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+{escaped_host} ansible_host={escaped_host} ansible_user={escaped_user} ansible_password={escaped_password} ansible_become=true ansible_become_pass={escaped_password} ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 """
     
-    # Create temporary inventory file
-    temp_inventory = tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False, dir=monitoring_dir)
+    # SECURITY: Create temporary inventory file in /tmp instead of project directory
+    # Use system temp directory which is more secure
+    temp_dir = tempfile.gettempdir()
+    temp_inventory = tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False, dir=temp_dir)
     temp_inventory.write(inventory_content)
     temp_inventory.close()
+    
+    # Set restrictive permissions (read/write for owner only)
+    os.chmod(temp_inventory.name, 0o600)
     
     return temp_inventory.name
 
@@ -285,10 +364,13 @@ def run_ansible_playbook(extra_vars, inventory_file='hosts.yml', prometheus_conf
     if prometheus_config:
         extra_vars['prometheus_auto_configure'] = True
     
-    # Create temporary file for extra vars
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    # SECURITY: Create temporary file in /tmp instead of project directory
+    temp_dir = tempfile.gettempdir()
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, dir=temp_dir) as f:
         json.dump(extra_vars, f)
         extra_vars_file = f.name
+        # Set restrictive permissions
+        os.chmod(extra_vars_file, 0o600)
     
     node_info_path = None
     try:
@@ -424,9 +506,20 @@ operation_timeout_sec = 10
             
             for path in node_info_paths:
                 if os.path.exists(path):
-                    with open(path, 'r') as f:
-                        node_info = json.load(f)
-                    break
+                    try:
+                        # SECURITY: Check file size before reading
+                        file_size = os.path.getsize(path)
+                        if file_size > 1024 * 1024:  # 1MB limit
+                            app.logger.warning(f"Node info file too large: {path} ({file_size} bytes)")
+                            break
+                        
+                        with open(path, 'r') as f:
+                            node_info = json.load(f)
+                        node_info_path = path  # Store path for cleanup
+                        break
+                    except (json.JSONDecodeError, IOError) as e:
+                        app.logger.warning(f"Error reading node info file {path}: {e}")
+                        continue
             
             # Update Prometheus if node info found
             if node_info:
@@ -521,12 +614,13 @@ operation_timeout_sec = 10
             'node_info': None
         }
     except Exception as e:
+        # SECURITY: Don't expose internal error details
         app.logger.error(f"Error running Ansible playbook: {str(e)}", exc_info=True)
         return {
             'success': False,
-            'error': f'Error running Ansible playbook: {str(e)}',
+            'error': 'Ansible playbook execution failed. Please check the logs for details.',
             'stdout': '',
-            'stderr': str(e),
+            'stderr': '',
             'returncode': -1,
             'prometheus_updated': False,
             'node_info': None
@@ -584,13 +678,25 @@ def check_podman():
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react_app(path):
-    """Serve React application"""
+    """
+    Serve React application
+    SECURITY: Path is validated to prevent path traversal attacks
+    """
     # Serve React build files
     static_dir = os.path.join(os.path.dirname(__file__), 'static')
     
-    # If requesting a file that exists in static, serve it
-    if path and os.path.exists(os.path.join(static_dir, path)):
-        return send_from_directory(static_dir, path)
+    # SECURITY: Validate and sanitize path to prevent path traversal
+    if path:
+        sanitized_path = sanitize_path(path, static_dir)
+        if not sanitized_path:
+            app.logger.warning(f"Path traversal attempt blocked: {path}")
+            return jsonify({'error': 'Invalid path'}), 400
+        
+        # Check if file exists and is within static_dir
+        if os.path.exists(sanitized_path) and os.path.isfile(sanitized_path):
+            # Get relative path for send_from_directory
+            rel_path = os.path.relpath(sanitized_path, static_dir)
+            return send_from_directory(static_dir, rel_path)
     
     # Otherwise serve index.html for React Router
     index_path = os.path.join(static_dir, 'index.html')
@@ -602,16 +708,33 @@ def serve_react_app(path):
     return render_template('index.html', prometheus_status=prometheus_status)
 
 @app.route('/api/prometheus-status')
+@rate_limit
 def prometheus_status():
     """Get Prometheus running status"""
     return jsonify(check_prometheus_status())
 
 @app.route('/api/install', methods=['POST'])
+@rate_limit
 def install():
     """Handle installation request"""
     try:
         data = request.json
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request: JSON data required'
+            }), 400
+        
         app.logger.info(f"Installation request received for host: {data.get('target_host', 'unknown')}, OS: {data.get('os', 'unknown')}")
+        
+        # SECURITY: Validate request using security utilities
+        is_valid, error_msg = validate_install_request(data)
+        if not is_valid:
+            app.logger.warning(f"Invalid installation request: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
         
         # Map new field names to backend expected names
         # Support both old and new field names for backward compatibility
@@ -621,30 +744,6 @@ def install():
         # Also set target_os from os field if provided
         if 'os' in data:
             data['target_os'] = data['os']
-        
-        # Validate required fields - only need OS now
-        required_fields = ['os']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({
-                    'success': False,
-                    'error': f'Missing required field: {field}'
-                }), 400
-        
-        # Validate target server credentials if provided
-        if data.get('target_host'):
-            if not data.get('target_username') or not data.get('target_password'):
-                return jsonify({
-                    'success': False,
-                    'error': 'Target server username and password are required when target host is provided'
-                }), 400
-        
-        # Validate OS
-        if data['os'] not in ['linux', 'windows', 'auto']:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid OS. Must be "linux", "windows", or "auto"'
-            }), 400
         
         # Create Ansible extra vars
         extra_vars = create_ansible_config(data)
@@ -672,62 +771,56 @@ def install():
                 app.logger.error(f"Installation failed for {data.get('target_host', 'unknown')}: {result.get('error', 'Unknown error')}")
             return jsonify(result)
         except subprocess.TimeoutExpired as e:
+            app.logger.error(f"Installation timeout: {str(e)}", exc_info=True)
             return jsonify({
                 'success': False,
                 'error': 'Installation timed out after 10 minutes',
                 'stdout': '',
-                'stderr': str(e),
+                'stderr': '',
                 'returncode': -1,
                 'prometheus_updated': False,
                 'node_info': None
             }), 500
         except Exception as e:
+            # SECURITY: Don't expose internal error details to client
+            app.logger.error(f"Installation failed: {str(e)}", exc_info=True)
             return jsonify({
                 'success': False,
-                'error': f'Failed to run installation: {str(e)}',
+                'error': 'Installation failed. Please check the logs for details.',
                 'stdout': '',
-                'stderr': str(e),
+                'stderr': '',
                 'returncode': -1,
                 'prometheus_updated': False,
                 'node_info': None
             }), 500
     
     except Exception as e:
+        # SECURITY: Don't expose internal error details to client
+        app.logger.error(f"Error processing installation request: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Invalid request. Please check your input and try again.'
         }), 500
 
 @app.route('/api/validate', methods=['POST'])
+@rate_limit
 def validate():
     """Validate configuration without running installation"""
     try:
         data = request.json
-        
-        # Validate required fields - only need OS now
-        required_fields = ['os']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({
-                    'valid': False,
-                    'error': f'Missing required field: {field}'
-                }), 400
-        
-        # Validate values
-        validation_errors = []
-        
-        if data['os'] not in ['linux', 'windows', 'auto']:
-            validation_errors.append('Invalid OS. Must be "linux", "windows", or "auto"')
-        
-        # Validate target server credentials if provided
-        if data.get('target_host'):
-            if not data.get('target_username') or not data.get('target_password'):
-                validation_errors.append('Target server username and password are required when target host is provided')
-        
-        if validation_errors:
+        if not data:
             return jsonify({
                 'valid': False,
-                'errors': validation_errors
+                'error': 'Invalid request: JSON data required'
+            }), 400
+        
+        # SECURITY: Use security utilities for validation
+        is_valid, error_msg = validate_install_request(data)
+        
+        if not is_valid:
+            return jsonify({
+                'valid': False,
+                'errors': [error_msg]
             }), 400
         
         return jsonify({
@@ -736,12 +829,15 @@ def validate():
         })
     
     except Exception as e:
+        # SECURITY: Don't expose internal error details
+        app.logger.error(f"Validation error: {str(e)}", exc_info=True)
         return jsonify({
             'valid': False,
-            'error': str(e)
+            'error': 'Validation failed. Please check your input.'
         }), 500
 
 @app.route('/api/generate-hash', methods=['POST'])
+@rate_limit
 def generate_hash():
     """Generate password hash"""
     try:
@@ -769,6 +865,7 @@ def generate_hash():
 
 # Server persistence API endpoints
 @app.route('/api/servers', methods=['GET'])
+@rate_limit
 def get_servers():
     """Get all monitored servers"""
     try:
@@ -788,6 +885,7 @@ def get_servers():
         }), 500
 
 @app.route('/api/servers', methods=['POST'])
+@rate_limit
 def add_server():
     """
     Add a new server
@@ -797,13 +895,15 @@ def add_server():
     """
     try:
         data = request.json
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request: JSON data required'
+            }), 400
+        
         app.logger.info(f"Adding server to database: {data.get('name', 'unknown')} ({data.get('ip', 'unknown')})")
         
-        # SECURITY: Remove any password fields before processing
-        # Passwords should only be used during installation, never stored
-        data = {k: v for k, v in data.items() 
-                if not any(pwd_key in k.lower() for pwd_key in ['password', 'passwd', 'pwd', 'secret', 'credential'])}
-        
+        # SECURITY: Validate and sanitize input data
         # Validate required fields
         required_fields = ['id', 'name', 'ip', 'port', 'os']
         for field in required_fields:
@@ -814,6 +914,55 @@ def add_server():
                     'error': f'Missing required field: {field}'
                 }), 400
         
+        # SECURITY: Sanitize server ID
+        sanitized_id = sanitize_server_id(data.get('id', ''))
+        if not sanitized_id:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server ID format'
+            }), 400
+        data['id'] = sanitized_id
+        
+        # SECURITY: Sanitize server name
+        sanitized_name = sanitize_server_name(data.get('name', ''))
+        if not sanitized_name:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server name format'
+            }), 400
+        data['name'] = sanitized_name
+        
+        # SECURITY: Validate IP address or hostname
+        ip_value = data.get('ip', '')
+        if not validate_ip_address(ip_value):
+            sanitized_ip = sanitize_hostname(ip_value)
+            if not sanitized_ip:
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid IP address or hostname format'
+                }), 400
+            data['ip'] = sanitized_ip
+        
+        # SECURITY: Validate port
+        try:
+            port = int(data.get('port', 0))
+            if not validate_port(port):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid port number (must be 1-65535)'
+                }), 400
+            data['port'] = port
+        except (ValueError, TypeError):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid port format'
+            }), 400
+        
+        # SECURITY: Remove any password fields before processing
+        # Passwords should only be used during installation, never stored
+        data = {k: v for k, v in data.items() 
+                if not any(pwd_key in k.lower() for pwd_key in ['password', 'passwd', 'pwd', 'secret', 'credential'])}
+        
         db = get_database()
         server = db.add_server(data)
         app.logger.info(f"Server added successfully: {server.get('name')} (ID: {server.get('id')})")
@@ -823,18 +972,29 @@ def add_server():
             'server': server
         })
     except Exception as e:
+        # SECURITY: Don't expose internal error details
         app.logger.error(f"Error adding server to database: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Failed to add server'
         }), 500
 
 @app.route('/api/servers/<server_id>', methods=['GET'])
+@rate_limit
 def get_server(server_id):
     """Get a specific server by ID"""
     try:
+        # SECURITY: Validate and sanitize server_id
+        sanitized_id = sanitize_server_id(server_id)
+        if not sanitized_id:
+            app.logger.warning(f"Invalid server_id format: {server_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server ID format'
+            }), 400
+        
         db = get_database()
-        server = db.get_server(server_id)
+        server = db.get_server(sanitized_id)
         
         if not server:
             return jsonify({
@@ -847,12 +1007,15 @@ def get_server(server_id):
             'server': server
         })
     except Exception as e:
+        # SECURITY: Don't expose internal error details
+        app.logger.error(f"Error retrieving server: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Failed to retrieve server information'
         }), 500
 
 @app.route('/api/servers/<server_id>', methods=['PUT'])
+@rate_limit
 def update_server(server_id):
     """
     Update a server
@@ -861,8 +1024,58 @@ def update_server(server_id):
     any password-related fields before updating the database.
     """
     try:
+        # SECURITY: Validate and sanitize server_id
+        sanitized_id = sanitize_server_id(server_id)
+        if not sanitized_id:
+            app.logger.warning(f"Invalid server_id format: {server_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server ID format'
+            }), 400
+        
         data = request.json
-        app.logger.info(f"Updating server: {server_id}")
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request: JSON data required'
+            }), 400
+        
+        app.logger.info(f"Updating server: {sanitized_id}")
+        
+        # SECURITY: Validate and sanitize input data
+        if 'name' in data:
+            sanitized_name = sanitize_server_name(data['name'])
+            if not sanitized_name:
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid server name format'
+                }), 400
+            data['name'] = sanitized_name
+        
+        if 'ip' in data:
+            if not validate_ip_address(data['ip']):
+                sanitized_ip = sanitize_hostname(data['ip'])
+                if not sanitized_ip:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid IP address or hostname format'
+                    }), 400
+                data['ip'] = sanitized_ip
+        
+        if 'port' in data:
+            try:
+                port = int(data['port'])
+                if not validate_port(port):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid port number (must be 1-65535)'
+                    }), 400
+                data['port'] = port
+            except (ValueError, TypeError):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid port format'
+                }), 400
         
         # SECURITY: Remove any password fields before processing
         # Passwords should only be used during installation, never stored
@@ -872,52 +1085,64 @@ def update_server(server_id):
         db = get_database()
         
         # Check if server exists
-        if not db.server_exists(server_id):
-            app.logger.warning(f"Update requested for non-existent server: {server_id}")
+        if not db.server_exists(sanitized_id):
+            app.logger.warning(f"Update requested for non-existent server: {sanitized_id}")
             return jsonify({
                 'success': False,
                 'error': 'Server not found'
             }), 404
         
-        server = db.update_server(server_id, data)
-        app.logger.info(f"Server updated successfully: {server_id}")
+        server = db.update_server(sanitized_id, data)
+        app.logger.info(f"Server updated successfully: {sanitized_id}")
         
         return jsonify({
             'success': True,
             'server': server
         })
     except Exception as e:
+        # SECURITY: Don't expose internal error details
         app.logger.error(f"Error updating server {server_id}: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Failed to update server'
         }), 500
 
 @app.route('/api/servers/<server_id>', methods=['DELETE'])
+@rate_limit
 def delete_server(server_id):
     """Delete a server"""
     try:
-        app.logger.info(f"Delete request for server: {server_id}")
+        # SECURITY: Validate and sanitize server_id
+        sanitized_id = sanitize_server_id(server_id)
+        if not sanitized_id:
+            app.logger.warning(f"Invalid server_id format: {server_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server ID format'
+            }), 400
+        
+        app.logger.info(f"Delete request for server: {sanitized_id}")
         db = get_database()
-        deleted = db.delete_server(server_id)
+        deleted = db.delete_server(sanitized_id)
         
         if not deleted:
-            app.logger.warning(f"Delete requested for non-existent server: {server_id}")
+            app.logger.warning(f"Delete requested for non-existent server: {sanitized_id}")
             return jsonify({
                 'success': False,
                 'error': 'Server not found'
             }), 404
         
-        app.logger.info(f"Server deleted successfully: {server_id}")
+        app.logger.info(f"Server deleted successfully: {sanitized_id}")
         return jsonify({
             'success': True,
             'message': 'Server deleted successfully'
         })
     except Exception as e:
+        # SECURITY: Don't expose internal error details
         app.logger.error(f"Error deleting server {server_id}: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Failed to delete server'
         }), 500
 
 if __name__ == '__main__':
