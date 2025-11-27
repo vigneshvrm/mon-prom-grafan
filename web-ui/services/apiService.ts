@@ -32,6 +32,25 @@ export interface PodmanStatus {
   version?: string | null;
 }
 
+export interface MonitoredServer {
+  id: string;
+  name: string;
+  ip: string;
+  port: number;
+  os: string;
+  sshUser: string;
+  status: string;
+  metrics: {
+    cpu: number[];
+    memory: number[];
+    timestamps: string[];
+  };
+  ansiblePlaybook?: string;
+  prometheusConfig?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 class ApiService {
   private baseUrl = '/api';
 
@@ -100,6 +119,63 @@ class ApiService {
     }
 
     return response.json();
+  }
+
+  // Server persistence methods
+  async getServers(): Promise<MonitoredServer[]> {
+    const response = await fetch(`${this.baseUrl}/servers`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch servers');
+    }
+    const data = await response.json();
+    return data.servers || [];
+  }
+
+  async addServer(server: MonitoredServer): Promise<MonitoredServer> {
+    const response = await fetch(`${this.baseUrl}/servers`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(server),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to add server');
+    }
+
+    const data = await response.json();
+    return data.server;
+  }
+
+  async updateServer(serverId: string, updates: Partial<MonitoredServer>): Promise<MonitoredServer> {
+    const response = await fetch(`${this.baseUrl}/servers/${serverId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update server');
+    }
+
+    const data = await response.json();
+    return data.server;
+  }
+
+  async deleteServer(serverId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/servers/${serverId}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete server');
+    }
   }
 }
 

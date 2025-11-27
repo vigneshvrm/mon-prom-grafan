@@ -42,9 +42,10 @@ ensure_system_packages() {
         echo "console-setup console-setup/charmap47 select UTF-8" | sudo debconf-set-selections
         echo "grub-pc grub-pc/install_devices multiselect" | sudo debconf-set-selections
         
-        local packages=(python3 python3-pip python3-venv sshpass curl)
+        local packages=(python3 python3-pip python3-venv sshpass curl libsqlite3-dev)
         # Note: npm is NOT included here - it comes with Node.js 20.x from NodeSource
         # Installing npm from Ubuntu repos pulls in 100+ unnecessary dependencies
+        # libsqlite3-dev ensures SQLite3 Python module works properly
         local missing=()
 
         for pkg in "${packages[@]}"; do
@@ -280,19 +281,19 @@ build_react_ui() {
 }
 
 # Step 1: Prepare base system dependencies
-echo "[1/7] Preparing base system dependencies..."
+echo "[1/8] Preparing base system dependencies..."
 ensure_system_packages
 ensure_python_venv
 ensure_node_runtime
 echo ""
 
 # Step 2: Install Python packages inside virtual environment
-echo "[2/7] Installing Python dependencies (isolated virtualenv)..."
+echo "[2/8] Installing Python dependencies (isolated virtualenv)..."
 install_python_dependencies
 echo ""
 
 # Step 3: Check Podman installation
-echo "[3/7] Checking Podman installation..."
+echo "[3/8] Checking Podman installation..."
 if ! command -v podman &> /dev/null; then
     echo "Podman is not installed. Installing..."
     if [ -f "${SCRIPT_DIR}/scripts/install-podman.sh" ]; then
@@ -309,7 +310,7 @@ fi
 echo ""
 
 # Step 4: Check Prometheus deployment
-echo "[4/7] Checking Prometheus deployment..."
+echo "[4/8] Checking Prometheus deployment..."
 if [ -f "${SCRIPT_DIR}/scripts/check-prometheus-service.sh" ]; then
     # Run check script - it exits with 1 if not running, which is expected
     # Use || true to prevent set -e from exiting
@@ -395,12 +396,12 @@ fi
 echo ""
 
 # Step 5: Build React UI
-echo "[5/7] Building React UI..."
+echo "[5/8] Building React UI..."
 build_react_ui
 echo ""
 
 # Step 6: Verify installation scripts are available
-echo "[6/7] Verifying installation scripts..."
+echo "[6/8] Verifying installation scripts..."
 INSTALL_SCRIPTS=(
     "install-podman.sh"
     "install-prometheus.sh"
@@ -418,8 +419,45 @@ for script in "${INSTALL_SCRIPTS[@]}"; do
 done
 echo ""
 
-# Step 7: Start Web UI
-echo "[7/7] Starting Web UI..."
+# Step 7: Verify SQLite and initialize database
+echo "[7/8] Verifying SQLite database support..."
+if "${PYTHON_BIN}" -c "import sqlite3" 2>/dev/null; then
+    echo "✓ SQLite3 support available (included with Python)"
+    
+    # Initialize database to ensure it's ready
+    echo "Initializing server database..."
+    if "${PYTHON_BIN}" -c "
+import sys
+import os
+sys.path.insert(0, os.path.join('${SCRIPT_DIR}', 'web-ui'))
+try:
+    from database import get_database
+    db = get_database()
+    # Test database connection by getting all servers (will create DB if needed)
+    servers = db.get_all_servers()
+    print('✓ Database initialized successfully')
+except Exception as e:
+    print(f'Warning: Database initialization check failed: {e}')
+    sys.exit(1)
+" 2>/dev/null; then
+        echo "✓ Database ready"
+    else
+        echo "Warning: Database initialization check failed, but continuing..."
+    fi
+else
+    echo "Error: SQLite3 not available in Python"
+    echo "This is unusual - SQLite3 should be included with Python"
+    echo "Attempting to install sqlite3 development libraries..."
+    if command -v apt-get &> /dev/null; then
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libsqlite3-dev python3-dev || {
+            echo "Warning: Could not install SQLite3 development libraries"
+        }
+    fi
+fi
+echo ""
+
+# Step 8: Start Web UI
+echo "[8/8] Starting Web UI..."
 echo ""
 
 # Create necessary directories
@@ -432,6 +470,27 @@ if [ ! -d "/etc/prometheus" ]; then
     echo "Creating /etc/prometheus directory..."
     sudo mkdir -p /etc/prometheus
     sudo chmod 755 /etc/prometheus
+fi
+
+# Create log directory and set permissions (try /var/log first, fallback to local)
+echo "Setting up logging directory..."
+if [ -w "/var/log" ]; then
+    LOG_DIR="/var/log"
+    echo "Using system log directory: ${LOG_DIR}"
+else
+    # Try to create with sudo, or use local directory
+    if sudo mkdir -p /var/log 2>/dev/null; then
+        LOG_DIR="/var/log"
+        # Set permissions so the application user can write
+        sudo chmod 755 /var/log
+        sudo touch /var/log/monitoring-app.log
+        sudo chmod 666 /var/log/monitoring-app.log 2>/dev/null || sudo chmod 644 /var/log/monitoring-app.log
+        echo "Created log directory with sudo: ${LOG_DIR}"
+    else
+        LOG_DIR="${SCRIPT_DIR}/web-ui/logs"
+        mkdir -p "${LOG_DIR}"
+        echo "Using local log directory: ${LOG_DIR}"
+    fi
 fi
 
 echo "========================================="

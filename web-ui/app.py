@@ -9,6 +9,9 @@ import subprocess
 import tempfile
 import shutil
 import sys
+import logging
+from logging.handlers import RotatingFileHandler
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import bcrypt
@@ -18,6 +21,7 @@ import yaml
 monitoring_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, monitoring_dir)
 from prometheus.prometheus_manager import PrometheusConfigManager
+from database import get_database
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -27,6 +31,75 @@ app.config['SECRET_KEY'] = os.urandom(24)
 # Ensure upload and certs directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs('certs', exist_ok=True)
+
+# Configure logging to /var/log
+LOG_DIR = '/var/log'
+LOG_FILE = os.path.join(LOG_DIR, 'monitoring-app.log')
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+# Create log directory if it doesn't exist (requires appropriate permissions)
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except PermissionError:
+    # If we can't create /var/log, fall back to local logs directory
+    LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+    LOG_FILE = os.path.join(LOG_DIR, 'monitoring-app.log')
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    datefmt=LOG_DATE_FORMAT
+)
+
+# Create file handler with rotation (10MB max, keep 5 backup files)
+file_handler = RotatingFileHandler(
+    LOG_FILE,
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+
+# Create console handler for development
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+
+# Get the Flask app logger and add handlers
+app.logger.setLevel(logging.INFO)
+app.logger.addHandler(file_handler)
+app.logger.addHandler(console_handler)
+
+# Also configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Log application startup
+app.logger.info("="*60)
+app.logger.info("Monitoring Application Starting")
+app.logger.info(f"Log file: {LOG_FILE}")
+app.logger.info(f"Python version: {sys.version}")
+app.logger.info("="*60)
+
+# Request logging middleware
+@app.before_request
+def log_request_info():
+    """Log all incoming API requests"""
+    if request.path.startswith('/api/'):
+        app.logger.info(f"API Request: {request.method} {request.path} from {request.remote_addr}")
+
+@app.after_request
+def log_response_info(response):
+    """Log API responses"""
+    if request.path.startswith('/api/'):
+        app.logger.debug(f"API Response: {request.method} {request.path} - Status {response.status_code}")
+    return response
 
 def check_prometheus_status():
     """Check if Prometheus is running (Podman container or systemd service)"""
@@ -258,10 +331,13 @@ operation_timeout_sec = 10
                 '  pip install ansible ansible-core'
             )
         
-        # Debug: Print what we're running
+        # Debug: Print what we're running (SECURITY: Don't print passwords)
         print(f"Running Ansible playbook: {playbook_path}")
         print(f"Inventory: {inventory_path}")
-        print(f"Extra vars: {extra_vars}")
+        # SECURITY: Don't log passwords - create sanitized copy for logging
+        sanitized_vars = {k: ('***REDACTED***' if 'password' in k.lower() or 'passwd' in k.lower() or 'pwd' in k.lower() else v) 
+                         for k, v in extra_vars.items()}
+        print(f"Extra vars: {sanitized_vars}")
         
         # Run ansible-playbook with aggressive timeout settings
         cmd = [
@@ -293,10 +369,15 @@ operation_timeout_sec = 10
         )
         
         # Log result for debugging
-        print(f"Ansible return code: {result.returncode}")
+        app.logger.info(f"Ansible playbook execution completed with return code: {result.returncode}")
         if result.returncode != 0:
-            print(f"Ansible stdout (last 20 lines):\n{chr(10).join(result.stdout.split(chr(10))[-20:]) if result.stdout else '(empty)'}")
-            print(f"Ansible stderr (last 20 lines):\n{chr(10).join(result.stderr.split(chr(10))[-20:]) if result.stderr else '(empty)'}")
+            app.logger.error(f"Ansible playbook failed (return code: {result.returncode})")
+            if result.stdout:
+                app.logger.debug(f"Ansible stdout (last 20 lines):\n{chr(10).join(result.stdout.split(chr(10))[-20:])}")
+            if result.stderr:
+                app.logger.error(f"Ansible stderr (last 20 lines):\n{chr(10).join(result.stderr.split(chr(10))[-20:])}")
+        else:
+            app.logger.info("Ansible playbook executed successfully")
         
         # Clean up ansible.cfg
         if os.path.exists(ansible_cfg_path):
@@ -334,11 +415,13 @@ operation_timeout_sec = 10
                     
                     if prom_manager.add_scrape_target(node_info):
                         prometheus_updated = True
+                        app.logger.info(f"Prometheus scrape target added: {node_info.get('hostname', 'unknown')}")
                         # Reload Prometheus if API is configured
                         if prometheus_config.get('reload_api'):
                             prom_manager.reload_prometheus()
+                            app.logger.info("Prometheus configuration reloaded")
                 except Exception as e:
-                    print(f"Error updating Prometheus: {e}")
+                    app.logger.error(f"Error updating Prometheus: {e}", exc_info=True)
         
         # Get the last few lines of output for better error display
         stdout_lines = result.stdout.split('\n') if result.stdout else []
@@ -404,6 +487,7 @@ operation_timeout_sec = 10
             'node_info': node_info
         }
     except subprocess.TimeoutExpired:
+        app.logger.error("Ansible playbook execution timed out after 10 minutes")
         return {
             'success': False,
             'error': 'Installation timed out after 10 minutes. The process may still be running.',
@@ -414,6 +498,7 @@ operation_timeout_sec = 10
             'node_info': None
         }
     except Exception as e:
+        app.logger.error(f"Error running Ansible playbook: {str(e)}", exc_info=True)
         return {
             'success': False,
             'error': f'Error running Ansible playbook: {str(e)}',
@@ -424,11 +509,26 @@ operation_timeout_sec = 10
             'node_info': None
         }
     finally:
-        # Clean up temp files
+        # SECURITY: Clean up temp files containing credentials
+        # These files may contain passwords, so they must be securely deleted
         if os.path.exists(extra_vars_file):
-            os.unlink(extra_vars_file)
+            try:
+                # Overwrite with zeros before deletion (if possible)
+                with open(extra_vars_file, 'wb') as f:
+                    f.write(b'\x00' * os.path.getsize(extra_vars_file))
+                os.unlink(extra_vars_file)
+            except:
+                os.unlink(extra_vars_file)
+        
         if dynamic_inventory and os.path.exists(dynamic_inventory):
-            os.unlink(dynamic_inventory)
+            try:
+                # Overwrite with zeros before deletion (if possible)
+                with open(dynamic_inventory, 'wb') as f:
+                    f.write(b'\x00' * os.path.getsize(dynamic_inventory))
+                os.unlink(dynamic_inventory)
+            except:
+                os.unlink(dynamic_inventory)
+        
         if node_info_path and os.path.exists(node_info_path):
             os.unlink(node_info_path)
 
@@ -488,6 +588,7 @@ def install():
     """Handle installation request"""
     try:
         data = request.json
+        app.logger.info(f"Installation request received for host: {data.get('target_host', 'unknown')}, OS: {data.get('os', 'unknown')}")
         
         # Map new field names to backend expected names
         # Support both old and new field names for backward compatibility
@@ -540,7 +641,12 @@ def install():
         
         # Run Ansible playbook with error handling
         try:
+            app.logger.info(f"Starting Ansible playbook execution for {data.get('target_host', 'unknown')}")
             result = run_ansible_playbook(extra_vars, data.get('inventory', 'hosts.yml'), prometheus_config)
+            if result.get('success'):
+                app.logger.info(f"Installation successful for {data.get('target_host', 'unknown')}")
+            else:
+                app.logger.error(f"Installation failed for {data.get('target_host', 'unknown')}: {result.get('error', 'Unknown error')}")
             return jsonify(result)
         except subprocess.TimeoutExpired as e:
             return jsonify({
@@ -638,7 +744,163 @@ def generate_hash():
             'error': str(e)
         }), 500
 
+# Server persistence API endpoints
+@app.route('/api/servers', methods=['GET'])
+def get_servers():
+    """Get all monitored servers"""
+    try:
+        db = get_database()
+        servers = db.get_all_servers()
+        app.logger.debug(f"Retrieved {len(servers)} servers from database")
+        return jsonify({
+            'success': True,
+            'servers': servers
+        })
+    except Exception as e:
+        app.logger.error(f"Error retrieving servers from database: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/servers', methods=['POST'])
+def add_server():
+    """
+    Add a new server
+    
+    SECURITY: Passwords are NEVER stored. This endpoint explicitly filters out
+    any password-related fields before saving to the database.
+    """
+    try:
+        data = request.json
+        app.logger.info(f"Adding server to database: {data.get('name', 'unknown')} ({data.get('ip', 'unknown')})")
+        
+        # SECURITY: Remove any password fields before processing
+        # Passwords should only be used during installation, never stored
+        data = {k: v for k, v in data.items() 
+                if not any(pwd_key in k.lower() for pwd_key in ['password', 'passwd', 'pwd', 'secret', 'credential'])}
+        
+        # Validate required fields
+        required_fields = ['id', 'name', 'ip', 'port', 'os']
+        for field in required_fields:
+            if field not in data:
+                app.logger.warning(f"Missing required field when adding server: {field}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
+        
+        db = get_database()
+        server = db.add_server(data)
+        app.logger.info(f"Server added successfully: {server.get('name')} (ID: {server.get('id')})")
+        
+        return jsonify({
+            'success': True,
+            'server': server
+        })
+    except Exception as e:
+        app.logger.error(f"Error adding server to database: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/servers/<server_id>', methods=['GET'])
+def get_server(server_id):
+    """Get a specific server by ID"""
+    try:
+        db = get_database()
+        server = db.get_server(server_id)
+        
+        if not server:
+            return jsonify({
+                'success': False,
+                'error': 'Server not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'server': server
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/servers/<server_id>', methods=['PUT'])
+def update_server(server_id):
+    """
+    Update a server
+    
+    SECURITY: Passwords are NEVER stored. This endpoint explicitly filters out
+    any password-related fields before updating the database.
+    """
+    try:
+        data = request.json
+        app.logger.info(f"Updating server: {server_id}")
+        
+        # SECURITY: Remove any password fields before processing
+        # Passwords should only be used during installation, never stored
+        data = {k: v for k, v in data.items() 
+                if not any(pwd_key in k.lower() for pwd_key in ['password', 'passwd', 'pwd', 'secret', 'credential'])}
+        
+        db = get_database()
+        
+        # Check if server exists
+        if not db.server_exists(server_id):
+            app.logger.warning(f"Update requested for non-existent server: {server_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Server not found'
+            }), 404
+        
+        server = db.update_server(server_id, data)
+        app.logger.info(f"Server updated successfully: {server_id}")
+        
+        return jsonify({
+            'success': True,
+            'server': server
+        })
+    except Exception as e:
+        app.logger.error(f"Error updating server {server_id}: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/servers/<server_id>', methods=['DELETE'])
+def delete_server(server_id):
+    """Delete a server"""
+    try:
+        app.logger.info(f"Delete request for server: {server_id}")
+        db = get_database()
+        deleted = db.delete_server(server_id)
+        
+        if not deleted:
+            app.logger.warning(f"Delete requested for non-existent server: {server_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Server not found'
+            }), 404
+        
+        app.logger.info(f"Server deleted successfully: {server_id}")
+        return jsonify({
+            'success': True,
+            'message': 'Server deleted successfully'
+        })
+    except Exception as e:
+        app.logger.error(f"Error deleting server {server_id}: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
+    app.logger.info("Starting Node Exporter Installation Web UI...")
+    app.logger.info("Access the application at http://localhost:5000")
+    app.logger.info(f"Logging to: {LOG_FILE}")
     print("Starting Node Exporter Installation Web UI...")
-    print("Access the application at http://localhost:5000")
+    print(f"Access the application at http://localhost:5000")
+    print(f"Log file: {LOG_FILE}")
     app.run(host='0.0.0.0', port=5000, debug=True)

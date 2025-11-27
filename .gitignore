@@ -73,3 +73,9 @@ tmp/*
 **/prometheus-*/
 !prometheus-config/
 !prometheus-data/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+web-ui/servers.db

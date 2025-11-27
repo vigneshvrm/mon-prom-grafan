@@ -49,13 +49,17 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
         });
 
         if (result.success) {
+            // SECURITY: Password is NOT stored - only used for installation and then discarded
+            // Generate a unique ID using timestamp and random number
+            const serverId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             const newServer: MonitoredServer = {
-                id: Date.now().toString(),
+                id: serverId,
                 name: formData.name,
                 ip: formData.ip,
                 port: parseInt(formData.port, 10),
                 os: osFamily,
                 sshUser: formData.sshUser,
+                // NOTE: Password is intentionally NOT included - credentials are never stored
                 status: ServerStatus.ONLINE,
                 metrics: {
                     cpu: [],
@@ -64,6 +68,9 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
                 }
             };
 
+            // Clear password from memory immediately after use
+            formData.password = '';
+            
             onAdd(newServer);
             handleClose();
         } else {

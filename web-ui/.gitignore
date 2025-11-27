@@ -27,3 +27,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+servers.db
+

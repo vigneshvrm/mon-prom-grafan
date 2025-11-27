@@ -1,2 +1,0 @@
-[linux]
-123.176.58.104 ansible_host=123.176.58.104 ansible_user=ubuntu ansible_password=s5YW3y6Qp2RwfHZ ansible_become=true ansible_become_pass=s5YW3y6Qp2RwfHZ ansible_ssh_common_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

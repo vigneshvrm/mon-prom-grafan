@@ -235,25 +235,38 @@ const App: React.FC = () => {
   const [prometheusStatus, setPrometheusStatus] = useState<PrometheusStatus | null>(null);
   const [podmanStatus, setPodmanStatus] = useState<PodmanStatus | null>(null);
 
-  // Fetch infrastructure status on mount
+  // Fetch infrastructure status and servers on mount
   useEffect(() => {
-    const fetchStatus = async () => {
+    const fetchData = async () => {
       try {
-        const [promStatus, podStatus] = await Promise.all([
+        const [promStatus, podStatus, serversData] = await Promise.all([
           apiService.getPrometheusStatus(),
-          apiService.getPodmanStatus()
+          apiService.getPodmanStatus(),
+          apiService.getServers().catch(() => []) // Load servers, fallback to empty array on error
         ]);
         setPrometheusStatus(promStatus);
         setPodmanStatus(podStatus);
+        setServers(serversData);
       } catch (error) {
-        console.error('Failed to fetch infrastructure status:', error);
+        console.error('Failed to fetch data:', error);
       }
     };
-    fetchStatus();
+    fetchData();
   }, []);
 
-  const handleAddServer = (server: MonitoredServer) => {
-    setServers(prev => [...prev, server]);
+  const handleAddServer = async (server: MonitoredServer) => {
+    try {
+      // Save to database via API
+      const savedServer = await apiService.addServer(server);
+      // Update local state with saved server
+      setServers(prev => [...prev, savedServer]);
+    } catch (error) {
+      console.error('Failed to save server:', error);
+      // Still add to local state for immediate UI feedback
+      setServers(prev => [...prev, server]);
+      // Show error to user (you can add a toast notification here)
+      alert('Failed to save server to database: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
   };
 
   if (!isBooted) {
