@@ -32,6 +32,10 @@ app.config['SECRET_KEY'] = os.urandom(24)
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs('certs', exist_ok=True)
 
+# Configure debug mode from environment variable or default to False
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() in ('true', '1', 'yes', 'on')
+app.config['DEBUG'] = DEBUG_MODE
+
 # Configure logging to /var/log
 LOG_DIR = '/var/log'
 LOG_FILE = os.path.join(LOG_DIR, 'monitoring-app.log')
@@ -47,9 +51,21 @@ except PermissionError:
     LOG_FILE = os.path.join(LOG_DIR, 'monitoring-app.log')
     os.makedirs(LOG_DIR, exist_ok=True)
 
+# Set log levels based on debug mode
+# Debug mode: DEBUG, INFO, WARNING, ERROR (all logs)
+# Normal mode: INFO, WARNING, ERROR (no DEBUG logs)
+if DEBUG_MODE:
+    FILE_LOG_LEVEL = logging.DEBUG
+    CONSOLE_LOG_LEVEL = logging.DEBUG
+    ROOT_LOG_LEVEL = logging.DEBUG
+else:
+    FILE_LOG_LEVEL = logging.INFO  # INFO and above (INFO, WARNING, ERROR)
+    CONSOLE_LOG_LEVEL = logging.INFO
+    ROOT_LOG_LEVEL = logging.INFO
+
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=ROOT_LOG_LEVEL,
     format=LOG_FORMAT,
     datefmt=LOG_DATE_FORMAT
 )
@@ -61,22 +77,22 @@ file_handler = RotatingFileHandler(
     backupCount=5,
     encoding='utf-8'
 )
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(FILE_LOG_LEVEL)
 file_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
 
 # Create console handler for development
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(CONSOLE_LOG_LEVEL)
 console_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
 
 # Get the Flask app logger and add handlers
-app.logger.setLevel(logging.INFO)
+app.logger.setLevel(ROOT_LOG_LEVEL)
 app.logger.addHandler(file_handler)
 app.logger.addHandler(console_handler)
 
 # Also configure root logger
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(ROOT_LOG_LEVEL)
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
@@ -84,6 +100,8 @@ root_logger.addHandler(console_handler)
 app.logger.info("="*60)
 app.logger.info("Monitoring Application Starting")
 app.logger.info(f"Log file: {LOG_FILE}")
+app.logger.info(f"Debug mode: {'ENABLED' if DEBUG_MODE else 'DISABLED'}")
+app.logger.info(f"Log level: {'DEBUG (all logs)' if DEBUG_MODE else 'INFO (INFO, WARNING, ERROR only)'}")
 app.logger.info(f"Python version: {sys.version}")
 app.logger.info("="*60)
 
@@ -96,9 +114,14 @@ def log_request_info():
 
 @app.after_request
 def log_response_info(response):
-    """Log API responses"""
+    """Log API responses (only in debug mode)"""
     if request.path.startswith('/api/'):
-        app.logger.debug(f"API Response: {request.method} {request.path} - Status {response.status_code}")
+        if DEBUG_MODE:
+            app.logger.debug(f"API Response: {request.method} {request.path} - Status {response.status_code}")
+        else:
+            # Only log errors in non-debug mode
+            if response.status_code >= 400:
+                app.logger.warning(f"API Error Response: {request.method} {request.path} - Status {response.status_code}")
     return response
 
 def check_prometheus_status():
@@ -751,7 +774,8 @@ def get_servers():
     try:
         db = get_database()
         servers = db.get_all_servers()
-        app.logger.debug(f"Retrieved {len(servers)} servers from database")
+        if DEBUG_MODE:
+            app.logger.debug(f"Retrieved {len(servers)} servers from database")
         return jsonify({
             'success': True,
             'servers': servers
@@ -900,7 +924,10 @@ if __name__ == '__main__':
     app.logger.info("Starting Node Exporter Installation Web UI...")
     app.logger.info("Access the application at http://localhost:5000")
     app.logger.info(f"Logging to: {LOG_FILE}")
+    app.logger.info(f"Debug mode: {'ENABLED' if DEBUG_MODE else 'DISABLED'}")
     print("Starting Node Exporter Installation Web UI...")
     print(f"Access the application at http://localhost:5000")
     print(f"Log file: {LOG_FILE}")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f"Debug mode: {'ENABLED' if DEBUG_MODE else 'DISABLED'}")
+    print(f"Log level: {'DEBUG (all logs)' if DEBUG_MODE else 'INFO (INFO, WARNING, ERROR only)'}")
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG_MODE)

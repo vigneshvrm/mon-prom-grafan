@@ -171,7 +171,9 @@ class ServerDatabase:
         Returns:
             List of server dictionaries
         """
-        logger.debug("Retrieving all servers from database")
+        # Only log debug messages if debug mode is enabled
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Retrieving all servers from database")
         conn = self._get_connection()
         cursor = conn.cursor()
         
@@ -185,7 +187,9 @@ class ServerDatabase:
         rows = cursor.fetchall()
         conn.close()
         
-        logger.debug(f"Retrieved {len(rows)} servers from database")
+        # Only log debug messages if debug mode is enabled
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Retrieved {len(rows)} servers from database")
         servers = []
         for row in rows:
             metrics = json.loads(row[7]) if row[7] else {'cpu': [], 'memory': [], 'timestamps': []}

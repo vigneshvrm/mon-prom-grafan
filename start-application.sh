@@ -565,4 +565,14 @@ fi
 echo "✓ Flask and dependencies verified"
 echo ""
 
+# Check for DEBUG_MODE environment variable
+if [ -n "${DEBUG_MODE}" ]; then
+    echo "Debug mode: ${DEBUG_MODE}"
+    export DEBUG_MODE="${DEBUG_MODE}"
+else
+    echo "Debug mode: disabled (set DEBUG_MODE=true to enable)"
+    export DEBUG_MODE="false"
+fi
+echo ""
+
 "${PYTHON_BIN}" app.py
