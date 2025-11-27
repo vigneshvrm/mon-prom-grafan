@@ -220,24 +220,83 @@
           - "Config Directory: {{ prometheus_config_dir }}"
           - "=========================================="
 
-    # Create systemd service for container (optional, for better management)
-    - name: Create systemd service for Prometheus container
-      template:
-        src: prometheus-podman.service.j2
-        dest: /etc/systemd/system/prometheus-podman.service
+    # Create systemd service for container using podman generate systemd
+    # This generates the service file based on the actual container configuration
+    # Note: Container must exist (running or stopped) before generating systemd file
+    - name: Ensure container exists before generating systemd service
+      debug:
+        msg: "Container {{ prometheus_container_name }} must exist to generate systemd service file"
+      when: not container_exists and not container_running
+
+    - name: Generate systemd service file for Prometheus container
+      command: >
+        podman generate systemd
+        --name {{ prometheus_container_name }}
+        --files
+        --new
+        --restart-policy=always
+      register: generate_systemd_result
+      changed_when: generate_systemd_result.rc == 0
+      failed_when: generate_systemd_result.rc != 0
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - container_exists or container_running
+      args:
+        chdir: /tmp
+
+    - name: Get generated systemd service filename
+      set_fact:
+        generated_service_file: "container-{{ prometheus_container_name }}.service"
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generate_systemd_result is defined
+        - generate_systemd_result.rc == 0
+
+    - name: Move generated systemd service file to system directory
+      copy:
+        src: "/tmp/{{ generated_service_file }}"
+        dest: "/etc/systemd/system/{{ generated_service_file }}"
         mode: '0644'
         owner: root
         group: root
-        backup: yes
+        remote_src: true
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
       notify: reload systemd
 
-    - name: Enable and start Prometheus systemd service
+    - name: Clean up temporary service file
+      file:
+        path: "/tmp/{{ generated_service_file }}"
+        state: absent
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
+      ignore_errors: true
+
+    - name: Reload systemd daemon
       systemd:
-        name: prometheus-podman.service
-        enabled: true
-        state: started
         daemon_reload: true
       when: ansible_facts['service_mgr'] == 'systemd'
+
+    - name: Enable Prometheus systemd service at boot
+      systemd:
+        name: "{{ generated_service_file }}"
+        enabled: true
+        daemon_reload: false
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
+      ignore_errors: true
+
+    - name: Start Prometheus systemd service
+      systemd:
+        name: "{{ generated_service_file }}"
+        state: started
+        daemon_reload: false
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
       ignore_errors: true
 
     # Configure firewall (if needed)
