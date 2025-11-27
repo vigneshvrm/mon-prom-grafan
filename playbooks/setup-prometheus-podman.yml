@@ -53,13 +53,18 @@
       failed_when: false
       ignore_errors: true
 
+    - name: Set container status variables
+      set_fact:
+        container_exists: "{{ container_exists_check.stdout == prometheus_container_name }}"
+        container_running: "{{ container_running_check.stdout == prometheus_container_name }}"
+
     - name: Display Prometheus installation status
       debug:
         msg:
           - "Checking existing Prometheus installation..."
           - "Systemd Service: {{ 'Running' if systemd_check.rc == 0 else 'Not running' }}"
-          - "Container (Running): {{ 'Running' if container_running_check.stdout == prometheus_container_name else 'Not running' }}"
-          - "Container (Exists): {{ 'Exists' if container_exists_check.stdout == prometheus_container_name else 'Does not exist' }}"
+          - "Container (Running): {{ 'Running' if container_running else 'Not running' }}"
+          - "Container (Exists): {{ 'Exists' if container_exists else 'Does not exist' }}"
 
     - name: Fail if Prometheus is already installed as systemd service
       fail:
@@ -96,11 +101,6 @@
         group: root
 
 
-    # Container status already checked above, but we need these variables for later tasks
-    - name: Set container status variables
-      set_fact:
-        container_exists: "{{ container_exists_check.stdout == prometheus_container_name }}"
-        container_running: "{{ container_running_check.stdout == prometheus_container_name }}"
 
     # Check if prometheus.yml exists
     - name: Check if prometheus.yml exists
