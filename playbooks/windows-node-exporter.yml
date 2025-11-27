@@ -53,11 +53,27 @@
         product_id: 'windows_exporter'
 
 
-    - name: Configure Windows Exporter service arguments
+    - name: Configure Windows Exporter service to start automatically
       win_service:
         name: windows_exporter
         start_mode: auto
         state: started
+
+    - name: Verify Windows Exporter service startup configuration
+      win_service:
+        name: windows_exporter
+      register: windows_exporter_service_config
+      changed_when: false
+
+    - name: Display Windows Exporter service configuration
+      debug:
+        msg:
+          - "Windows Exporter Service Configuration:"
+          - "  Service Name: windows_exporter"
+          - "  Service State: {{ windows_exporter_service_config.state | default('Unknown') }}"
+          - "  Start Mode: {{ windows_exporter_service_config.start_mode | default('Unknown') }}"
+          - "  Service Exists: {{ windows_exporter_service_config.exists | default(false) }}"
+          - "  Auto-Start on Boot: {{ 'YES' if windows_exporter_service_config.start_mode | default('') == 'auto' else 'NO - Service may not start on reboot' }}"
 
     - name: Open port in Windows Firewall
       win_firewall_rule:
@@ -79,6 +95,18 @@
       win_service:
         name: windows_exporter
       register: windows_exporter_service_check
+      ignore_errors: true
+
+    - name: Verify Windows Exporter service startup type (final check)
+      win_shell: |
+        $service = Get-WmiObject -Class Win32_Service -Filter "Name='windows_exporter'"
+        if ($service) {
+          Write-Output "{`"name`":`"$($service.Name)`",`"state`":`"$($service.State)`",`"start_mode`":`"$($service.StartMode)`",`"status`":`"$($service.Status)`"}"
+        } else {
+          Write-Output "{`"name`":`"windows_exporter`",`"state`":`"Not Found`",`"start_mode`":`"Unknown`",`"status`":`"Not Found`"}"
+        }
+      register: windows_exporter_final_check
+      changed_when: false
       ignore_errors: true
 
     - name: Verify Windows Exporter is listening on port
@@ -113,14 +141,23 @@
     - name: Display Windows Exporter status
       debug:
         msg:
-          - "Windows Exporter installed successfully!"
+          - "=========================================="
+          - "Windows Exporter Installation Summary"
+          - "=========================================="
           - "Version: {{ windows_exporter_version }}"
           - "Port: {{ windows_exporter_port }}"
           - "Install Directory: {{ windows_exporter_install_dir }}"
           - "Hostname: {{ node_info.hostname }}"
           - "IP Address: {{ node_info.ip_address }}"
           - "Service Status: {{ 'Running' if (windows_exporter_service_check.exists | default(false)) and (windows_exporter_service_check.state == 'running') else 'Not running - check manually' }}"
+          - "Service Start Mode: {{ (windows_exporter_final_check.stdout | from_json).start_mode | default('Unknown') if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
+          - "Auto-Start on Boot: {{ 'YES - Service will start automatically on reboot' if (windows_exporter_final_check.stdout | from_json).start_mode | default('') == 'Auto' else 'NO - Service may not start on reboot' if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
           - "Port Status: {{ 'Listening' if windows_exporter_port_check is succeeded else 'Not listening - check manually' }}"
+          - "=========================================="
+          - "To verify service configuration manually:"
+          - "  Get-Service windows_exporter"
+          - "  Get-WmiObject -Class Win32_Service -Filter \"Name='windows_exporter'\" | Select-Object Name, State, StartMode"
+          - "=========================================="
 
     - name: Create tmp directory on localhost
       file:

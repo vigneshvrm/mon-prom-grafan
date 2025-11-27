@@ -10,6 +10,8 @@ import tempfile
 import shutil
 import sys
 import logging
+import socket
+import requests
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_from_directory, after_this_request
@@ -1181,6 +1183,139 @@ def delete_server(server_id):
         return jsonify({
             'success': False,
             'error': 'Failed to delete server'
+        }), 500
+
+def check_server_health(server):
+    """
+    Check server health by testing connectivity and Node Exporter availability
+    
+    Args:
+        server: Server dictionary with ip, port, os fields
+        
+    Returns:
+        Tuple of (is_online: bool, status_message: str)
+    """
+    server_ip = server.get('ip', '')
+    # Use SSH port (22) for Linux, WinRM port (5985/5986) for Windows
+    # Default to 22 if port not specified
+    server_port = server.get('port', 22)
+    server_os = server.get('os', '').lower()
+    node_exporter_port = 9100  # Standard Node Exporter port
+    
+    # Check 1: Basic port connectivity (SSH for Linux, WinRM for Windows)
+    port_online = False
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)  # 5 second timeout
+        result = sock.connect_ex((server_ip, server_port))
+        sock.close()
+        port_online = (result == 0)
+    except Exception as e:
+        if DEBUG_MODE:
+            app.logger.debug(f"Port connectivity check failed for {server_ip}:{server_port}: {e}")
+        port_online = False
+    
+    # Check 2: Node Exporter availability (if port is open, try to connect to metrics endpoint)
+    node_exporter_online = False
+    if port_online:
+        try:
+            # Try to connect to Node Exporter metrics endpoint
+            metrics_url = f"http://{server_ip}:{node_exporter_port}/metrics"
+            response = requests.get(metrics_url, timeout=5)
+            if response.status_code == 200:
+                node_exporter_online = True
+        except Exception as e:
+            if DEBUG_MODE:
+                app.logger.debug(f"Node Exporter check failed for {server_ip}:{node_exporter_port}: {e}")
+            node_exporter_online = False
+    
+    # Determine status
+    if node_exporter_online:
+        return True, 'ONLINE'
+    elif port_online:
+        # Port is open but Node Exporter not responding - might be installing or not installed
+        # Still mark as ERROR since Node Exporter is not available
+        return False, 'ERROR'
+    else:
+        # Port is closed - server is unreachable (OS reinstalled, server down, etc.)
+        return False, 'ERROR'
+
+@app.route('/api/servers/<server_id>/health', methods=['GET'])
+@rate_limit
+def check_server_health_endpoint(server_id):
+    """Check health of a specific server"""
+    try:
+        # SECURITY: Validate and sanitize server_id
+        sanitized_id = sanitize_server_id(server_id)
+        if not sanitized_id:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid server ID format'
+            }), 400
+        
+        db = get_database()
+        server = db.get_server(sanitized_id)
+        
+        if not server:
+            return jsonify({
+                'success': False,
+                'error': 'Server not found'
+            }), 404
+        
+        # Check server health
+        is_online, status = check_server_health(server)
+        
+        # Update status in database
+        db.update_server(sanitized_id, {'status': status})
+        
+        return jsonify({
+            'success': True,
+            'online': is_online,
+            'status': status,
+            'server': db.get_server(sanitized_id)
+        })
+    except Exception as e:
+        app.logger.error(f"Error checking server health {server_id}: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check server health'
+        }), 500
+
+@app.route('/api/servers/health-check-all', methods=['POST'])
+@rate_limit
+def check_all_servers_health():
+    """Check health of all servers and update their status"""
+    try:
+        db = get_database()
+        servers = db.get_all_servers()
+        
+        updated_count = 0
+        for server in servers:
+            try:
+                is_online, status = check_server_health(server)
+                db.update_server(server['id'], {'status': status})
+                updated_count += 1
+                if DEBUG_MODE:
+                    app.logger.debug(f"Health check for {server.get('name')} ({server.get('ip')}): {status}")
+            except Exception as e:
+                app.logger.warning(f"Error checking health for server {server.get('id')}: {e}")
+                # Update to ERROR status if check fails
+                try:
+                    db.update_server(server['id'], {'status': 'ERROR'})
+                except:
+                    pass
+        
+        return jsonify({
+            'success': True,
+            'checked': len(servers),
+            'updated': updated_count,
+            'message': f'Health check completed for {updated_count} servers'
+        })
+    except Exception as e:
+        app.logger.error(f"Error checking all servers health: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check servers health'
         }), 500
 
 if __name__ == '__main__':

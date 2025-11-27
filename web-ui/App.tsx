@@ -252,6 +252,20 @@ const App: React.FC = () => {
       }
     };
     fetchData();
+
+    // Periodic health check for all servers (every 30 seconds)
+    const healthCheckInterval = setInterval(async () => {
+      try {
+        await apiService.checkAllServersHealth();
+        // Refresh server list to get updated statuses
+        const serversData = await apiService.getServers().catch(() => []);
+        setServers(serversData);
+      } catch (error) {
+        console.error('Health check failed:', error);
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(healthCheckInterval);
   }, []);
 
   const handleAddServer = async (server: MonitoredServer) => {

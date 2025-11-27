@@ -177,6 +177,26 @@ class ApiService {
       throw new Error(error.error || 'Failed to delete server');
     }
   }
+
+  async checkServerHealth(serverId: string): Promise<{ success: boolean; online: boolean; status: string; server: MonitoredServer }> {
+    const response = await fetch(`${this.baseUrl}/servers/${serverId}/health`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to check server health');
+    }
+    return response.json();
+  }
+
+  async checkAllServersHealth(): Promise<{ success: boolean; checked: number; updated: number; message: string }> {
+    const response = await fetch(`${this.baseUrl}/servers/health-check-all`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to check servers health');
+    }
+    return response.json();
+  }
 }
 
 export const apiService = new ApiService();
