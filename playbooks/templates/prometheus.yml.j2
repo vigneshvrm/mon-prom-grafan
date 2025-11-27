@@ -17,9 +17,6 @@ global:
   
   # Timeout for scrape requests
   scrape_timeout: 10s
-  
-  # How long to wait before marking a target as down
-  scrape_timeout_offset: {{ prometheus_timeout_offset | default('10s') }}
 
 # Alertmanager configuration (if using)
 # alerting:
