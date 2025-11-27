@@ -223,10 +223,19 @@
     # Create systemd service for container using podman generate systemd
     # This generates the service file based on the actual container configuration
     # Note: Container must exist (running or stopped) before generating systemd file
-    - name: Ensure container exists before generating systemd service
+    - name: Verify container exists for systemd service generation
+      command: podman ps -a --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name={{ prometheus_container_name }}"
+      register: verify_container_exists
+      changed_when: false
+      failed_when: false
+      when: ansible_facts['service_mgr'] == 'systemd'
+
+    - name: Display container verification result
       debug:
-        msg: "Container {{ prometheus_container_name }} must exist to generate systemd service file"
-      when: not container_exists and not container_running
+        msg: "Container verification: {{ 'EXISTS' if verify_container_exists.stdout == prometheus_container_name else 'DOES NOT EXIST' }}"
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - verify_container_exists is defined
 
     - name: Generate systemd service file for Prometheus container
       command: >
@@ -237,12 +246,19 @@
         --restart-policy=always
       register: generate_systemd_result
       changed_when: generate_systemd_result.rc == 0
-      failed_when: generate_systemd_result.rc != 0
+      failed_when: false
       when: 
         - ansible_facts['service_mgr'] == 'systemd'
-        - container_exists or container_running
+        - verify_container_exists.stdout == prometheus_container_name
       args:
         chdir: /tmp
+
+    - name: Display systemd generation result
+      debug:
+        msg: "Systemd generation: {{ 'SUCCESS' if generate_systemd_result.rc == 0 else 'FAILED - ' + generate_systemd_result.stderr | default('Unknown error') }}"
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generate_systemd_result is defined
 
     - name: Get generated systemd service filename
       set_fact:
@@ -251,6 +267,21 @@
         - ansible_facts['service_mgr'] == 'systemd'
         - generate_systemd_result is defined
         - generate_systemd_result.rc == 0
+
+    - name: Check if generated service file exists in /tmp
+      stat:
+        path: "/tmp/{{ generated_service_file }}"
+      register: service_file_stat
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
+
+    - name: Display service file check result
+      debug:
+        msg: "Service file in /tmp: {{ 'EXISTS' if service_file_stat.stat.exists else 'NOT FOUND' }}"
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - service_file_stat is defined
 
     - name: Move generated systemd service file to system directory
       copy:
@@ -263,7 +294,23 @@
       when: 
         - ansible_facts['service_mgr'] == 'systemd'
         - generated_service_file is defined
+        - service_file_stat.stat.exists | default(false)
       notify: reload systemd
+
+    - name: Verify service file was moved to system directory
+      stat:
+        path: "/etc/systemd/system/{{ generated_service_file }}"
+      register: final_service_file_stat
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - generated_service_file is defined
+
+    - name: Display final service file status
+      debug:
+        msg: "Service file in /etc/systemd/system/: {{ 'EXISTS' if final_service_file_stat.stat.exists else 'NOT FOUND' }}"
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - final_service_file_stat is defined
 
     - name: Clean up temporary service file
       file:
@@ -277,7 +324,9 @@
     - name: Reload systemd daemon
       systemd:
         daemon_reload: true
-      when: ansible_facts['service_mgr'] == 'systemd'
+      when: 
+        - ansible_facts['service_mgr'] == 'systemd'
+        - final_service_file_stat.stat.exists | default(false)
 
     - name: Enable Prometheus systemd service at boot
       systemd:
@@ -287,6 +336,7 @@
       when: 
         - ansible_facts['service_mgr'] == 'systemd'
         - generated_service_file is defined
+        - final_service_file_stat.stat.exists | default(false)
       ignore_errors: true
 
     - name: Start Prometheus systemd service
@@ -297,6 +347,7 @@
       when: 
         - ansible_facts['service_mgr'] == 'systemd'
         - generated_service_file is defined
+        - final_service_file_stat.stat.exists | default(false)
       ignore_errors: true
 
     # Configure firewall (if needed)

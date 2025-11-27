@@ -210,7 +210,7 @@
       register: firewalld_running
       changed_when: false
       failed_when: false
-      when: configure_firewall | bool and ansible_facts['os_family'] in ['RedHat', 'Suse'] and firewalld_service.status.ActiveState is defined
+      when: configure_firewall | bool and ansible_facts['os_family'] in ['RedHat', 'Suse'] and firewalld_service.status is defined and firewalld_service.status.ActiveState is defined
 
     - name: Configure firewall with firewalld (RedHat/SUSE)
       firewalld:
@@ -224,7 +224,7 @@
         - ansible_facts['os_family'] in ['RedHat', 'Suse']
         - firewalld_running.rc == 0
         - firewalld_running.stdout is defined
-        - 'running' in firewalld_running.stdout
+        - firewalld_running.stdout | default('') | regex_search('running')
       failed_when: false
 
     - name: Display firewalld configuration result
@@ -260,7 +260,7 @@
         - ansible_facts['os_family'] == 'Debian'
         - ufw_status.rc == 0
         - ufw_status.stdout is defined
-        - 'Status: active' in ufw_status.stdout
+        - ufw_status.stdout | default('') | regex_search('Status: active')
       failed_when: false
 
     - name: Display ufw configuration result
