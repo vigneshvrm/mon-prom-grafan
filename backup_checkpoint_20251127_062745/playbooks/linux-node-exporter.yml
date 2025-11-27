@@ -1,0 +1,400 @@
+---
+- name: Install Secure Node Exporter on Linux
+  hosts: linux
+  gather_facts: true
+  gather_timeout: 10  # Timeout for fact gathering
+  become: true
+  connection: smart
+  any_errors_fatal: false
+
+  vars:
+    # These will be set from the frontend/CLI
+    target_os: "{{ target_os | default('auto') }}"
+    node_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    # prometheus_auto_configure: "{{ prometheus_auto_configure | default(false) }}"
+    prometheus_auto_configure: false
+    # Option to configure firewall (default: true)
+    configure_firewall: "{{ configure_firewall | default(true) }}"
+    
+    node_exporter_version: "1.10.2"
+    node_exporter_user: "node_exporter"
+    node_exporter_group: "node_exporter"
+    node_exporter_listen_address: "0.0.0.0:{{ node_exporter_port | default('9100') }}"
+    node_exporter_binary: "/usr/local/bin/node_exporter"
+    
+    # Architecture mapping
+    linux_arch_map:
+      x86_64: amd64
+      aarch64: arm64
+      armv7l: armv7
+      armv6l: armv6
+
+  tasks:
+    - name: Detect Linux distribution
+      debug:
+        msg:
+          - "OS Family: {{ ansible_facts['os_family'] }}"
+          - "Distribution: {{ ansible_facts['distribution'] }}"
+          - "Version: {{ ansible_facts['distribution_version'] }}"
+          - "Architecture: {{ ansible_facts['architecture'] }}"
+
+    - name: Set distribution-specific facts
+      set_fact:
+        is_debian_based: "{{ ansible_facts['os_family'] == 'Debian' }}"
+        is_redhat_based: "{{ ansible_facts['os_family'] == 'RedHat' }}"
+        is_arch_based: "{{ ansible_facts['distribution'] | lower in ['arch', 'manjaro'] }}"
+        is_suse_based: "{{ ansible_facts['os_family'] == 'Suse' }}"
+
+    # Check which download tool is available (curl or wget)
+    - name: Check if curl is available
+      command: which curl
+      register: curl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check if wget is available
+      command: which wget
+      register: wget_check
+      changed_when: false
+      failed_when: false
+
+    # Only install download tool if neither is available (rare case)
+    - name: Install curl if neither curl nor wget is available (Debian/Ubuntu)
+      apt:
+        name: curl
+        state: present
+        update_cache: no
+      when: is_debian_based and curl_check.rc != 0 and wget_check.rc != 0
+
+    - name: Install curl if neither curl nor wget is available (RHEL/CentOS)
+      yum:
+        name: curl
+        state: present
+      when: is_redhat_based and curl_check.rc != 0 and wget_check.rc != 0
+
+    - name: Install curl if neither curl nor wget is available (Arch)
+      pacman:
+        name: curl
+        state: present
+        update_cache: no
+      when: is_arch_based and curl_check.rc != 0 and wget_check.rc != 0
+
+    - name: Install curl if neither curl nor wget is available (SUSE)
+      zypper:
+        name: curl
+        state: present
+      when: is_suse_based and curl_check.rc != 0 and wget_check.rc != 0
+
+    # Note: bcrypt is not needed on target server - password hashing happens on web server
+    # Only curl/wget needed to download Node Exporter binary
+
+    - name: Fetch latest node_exporter release info
+      uri:
+        url: https://api.github.com/repos/prometheus/node_exporter/releases/latest
+        method: GET
+        return_content: true
+        status_code: 200
+      register: node_exporter_release
+      until: node_exporter_release.status == 200
+      retries: 3
+      delay: 5
+
+    - name: Set node_exporter version from latest release
+      set_fact:
+        node_exporter_version: "{{ (node_exporter_release.json.tag_name | default(node_exporter_version)) | regex_replace('^v','') }}"
+
+    - name: Set Linux arch fact
+      set_fact:
+        linux_arch: "{{ linux_arch_map[ansible_facts['architecture']] | default('amd64') }}"
+
+    - name: Set Linux package name
+      set_fact:
+        linux_pkg: "node_exporter-{{ node_exporter_version }}.linux-{{ linux_arch }}"
+
+    - name: Set Linux download URL
+      set_fact:
+        linux_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/{{ linux_pkg }}.tar.gz"
+    
+    - name: Ensure node_exporter group exists
+      group:
+        name: node_exporter
+        state: present
+
+    - name: Ensure node_exporter user exists
+      user:
+        name: "{{ node_exporter_user }}"
+        group: "{{ node_exporter_group }}"
+        shell: /usr/sbin/nologin
+        system: true
+        create_home: false
+        comment: "Prometheus Node Exporter User"
+
+    - name: Download node_exporter tarball
+      get_url:
+        url: "{{ linux_url }}"
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+        timeout: 30
+      retries: 2
+      delay: 3
+
+    - name: Extract node_exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp/
+        remote_src: true
+        creates: "/tmp/{{ linux_pkg }}/node_exporter"
+
+    - name: Install node_exporter binary
+      copy:
+        src: "/tmp/{{ linux_pkg }}/node_exporter"
+        dest: "{{ node_exporter_binary }}"
+        mode: '0755'
+        owner: root
+        group: root
+        remote_src: true
+      notify: Restart node_exporter
+
+    - name: Create node_exporter systemd service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          User={{ node_exporter_user }}
+          Group={{ node_exporter_group }}
+          Type=simple
+          ExecStart={{ node_exporter_binary }} \
+            --web.listen-address={{ node_exporter_listen_address }} \
+            --path.procfs=/proc \
+            --path.sysfs=/sys \
+            --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Daemon reload
+        - Restart node_exporter
+
+    - name: Enable and start node_exporter
+      systemd:
+        name: node_exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # Firewall configuration section
+    # Check if firewalld is installed and active
+    - name: Check if firewalld service is active
+      systemd:
+        name: firewalld
+      register: firewalld_service
+      changed_when: false
+      failed_when: false
+      when: configure_firewall | bool and ansible_facts['os_family'] in ['RedHat', 'Suse']
+
+    - name: Check if firewalld is running
+      command: firewall-cmd --state
+      register: firewalld_running
+      changed_when: false
+      failed_when: false
+      when: configure_firewall | bool and ansible_facts['os_family'] in ['RedHat', 'Suse'] and firewalld_service.status.ActiveState is defined
+
+    - name: Configure firewall with firewalld (RedHat/SUSE)
+      firewalld:
+        port: "{{ node_exporter_port }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: true
+      register: firewalld_result
+      when: 
+        - configure_firewall | bool
+        - ansible_facts['os_family'] in ['RedHat', 'Suse']
+        - firewalld_running.rc == 0
+        - firewalld_running.stdout is defined
+        - 'running' in firewalld_running.stdout
+      failed_when: false
+
+    - name: Display firewalld configuration result
+      debug:
+        msg: "Firewall rule for port {{ node_exporter_port }}/tcp {{ 'configured successfully' if firewalld_result is defined and firewalld_result.changed else 'may already exist or firewalld is not active' }}"
+      when: configure_firewall | bool and firewalld_result is defined
+
+    # Check if ufw is installed and active
+    - name: Check if ufw service exists
+      systemd:
+        name: ufw
+      register: ufw_service
+      changed_when: false
+      failed_when: false
+      when: configure_firewall | bool and ansible_facts['os_family'] == 'Debian'
+
+    - name: Check ufw status
+      command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+      when: configure_firewall | bool and ansible_facts['os_family'] == 'Debian' and ufw_service.status is defined
+
+    - name: Configure firewall with ufw (Debian/Ubuntu)
+      ufw:
+        rule: allow
+        port: "{{ node_exporter_port }}"
+        proto: tcp
+        comment: "Node Exporter metrics port"
+      register: ufw_result
+      when:
+        - configure_firewall | bool
+        - ansible_facts['os_family'] == 'Debian'
+        - ufw_status.rc == 0
+        - ufw_status.stdout is defined
+        - 'Status: active' in ufw_status.stdout
+      failed_when: false
+
+    - name: Display ufw configuration result
+      debug:
+        msg: "UFW rule for port {{ node_exporter_port }}/tcp {{ 'configured successfully' if ufw_result is defined and ufw_result.changed else 'may already exist or UFW is not active' }}"
+      when: configure_firewall | bool and ufw_result is defined
+
+    # Fallback: iptables direct configuration (if no firewall manager is active)
+    - name: Check if iptables rule already exists
+      command: iptables -C INPUT -p tcp --dport {{ node_exporter_port }} -j ACCEPT
+      register: iptables_check_existing
+      changed_when: false
+      failed_when: false
+      when: 
+        - configure_firewall | bool
+        - firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed)
+        - ufw_result is not defined or (ufw_result is defined and ufw_result.failed)
+
+    - name: Add iptables rule for Node Exporter port (if not exists)
+      command: iptables -I INPUT 1 -p tcp --dport {{ node_exporter_port }} -j ACCEPT -m comment --comment "Node Exporter metrics port"
+      register: iptables_result
+      when:
+        - configure_firewall | bool
+        - iptables_check_existing.rc != 0
+        - firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed)
+        - ufw_result is not defined or (ufw_result is defined and ufw_result.failed)
+      failed_when: false
+
+    - name: Save iptables rules (if iptables-save is available)
+      command: iptables-save > /etc/iptables/rules.v4
+      register: iptables_save_result
+      when:
+        - configure_firewall | bool
+        - iptables_result is defined
+        - iptables_result.rc == 0
+        - ansible_facts['os_family'] == 'Debian'
+      failed_when: false
+      ignore_errors: true
+
+    - name: Save iptables rules for RHEL/CentOS (if iptables-save is available)
+      command: service iptables save
+      register: iptables_save_rhel
+      when:
+        - configure_firewall | bool
+        - iptables_result is defined
+        - iptables_result.rc == 0
+        - ansible_facts['os_family'] == 'RedHat'
+      failed_when: false
+      ignore_errors: true
+
+    - name: Display iptables configuration result
+      debug:
+        msg: "iptables rule for port {{ node_exporter_port }}/tcp {{ 'configured successfully' if iptables_result is defined and iptables_result.rc == 0 else 'may already exist or iptables is not available' }}"
+      when: configure_firewall | bool and iptables_result is defined
+
+    - name: Warning if firewall configuration was skipped
+      debug:
+        msg: 
+          - "WARNING: Firewall configuration was skipped or no active firewall detected."
+          - "Please manually allow port {{ node_exporter_port }}/tcp in your firewall if needed."
+          - "To skip firewall configuration, set configure_firewall=false"
+      when: 
+        - configure_firewall | bool
+        - (firewalld_result is not defined or (firewalld_result is defined and firewalld_result.failed))
+        - (ufw_result is not defined or (ufw_result is defined and ufw_result.failed))
+        - (iptables_result is not defined or (iptables_result is defined and iptables_result.failed))
+
+    - name: Verify node_exporter is running
+      uri:
+        url: "http://localhost:{{ node_exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+      register: node_exporter_check
+      retries: 5
+      delay: 3
+      until: node_exporter_check.status == 200
+      ignore_errors: true
+
+    - name: Collect node information for Prometheus
+      set_fact:
+        node_info:
+          hostname: "{{ ansible_facts['hostname'] }}"
+          fqdn: "{{ ansible_facts['fqdn'] | default(ansible_facts['hostname']) }}"
+          ip_address: "{{ ansible_facts['default_ipv4']['address'] | default(ansible_facts['all_ipv4_addresses'][0] | default('127.0.0.1')) }}"
+          port: "{{ node_exporter_port }}"
+          os: "{{ ansible_facts['os_family'] }}"
+          instance_label: "{{ ansible_facts['hostname'] }}-{{ ansible_facts['default_ipv4']['address'] | default('127.0.0.1') }}"
+          scheme: "http"
+          job_name: "node-exporter"
+
+    - name: Display node_exporter status
+      debug:
+        msg:
+          - "Node Exporter installed successfully!"
+          - "Version: {{ node_exporter_version }}"
+          - "Listening on: {{ node_exporter_listen_address }}"
+          - "Hostname: {{ node_info.hostname }}"
+          - "IP Address: {{ node_info.ip_address }}"
+          - "Status: {{ 'Running' if node_exporter_check.status == 200 else 'Check manually' }}"
+
+    - name: Create tmp directory on localhost
+      file:
+        path: "{{ playbook_dir }}/../tmp"
+        state: directory
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+    - name: Save node information for Prometheus configuration
+      copy:
+        content: |
+          {
+            "hostname": "{{ node_info.hostname }}",
+            "fqdn": "{{ node_info.fqdn }}",
+            "ip_address": "{{ node_info.ip_address }}",
+            "port": "{{ node_info.port }}",
+            "os": "{{ node_info.os }}",
+            "instance_label": "{{ node_info.instance_label }}",
+            "scheme": "http",
+            "job_name": "node-exporter"
+          }
+        dest: "{{ playbook_dir }}/../tmp/node_exporter_info.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+  handlers:
+    - name: Daemon reload
+      systemd:
+        daemon_reload: true
+
+    - name: Restart node_exporter
+      systemd:
+        name: node_exporter
+        state: restarted
+
