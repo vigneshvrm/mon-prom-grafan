@@ -323,9 +323,15 @@ def create_dynamic_inventory(target_host, target_username, target_password, os_t
     if not sanitized_user:
         raise ValueError(f"Invalid username format: {target_username}")
     
-    # Password doesn't need sanitization for Ansible (it's used as-is in inventory)
-    # But we'll escape it to be safe
-    escaped_password = escape_ansible_value(target_password) if target_password else '""'
+    # Password handling: Ansible inventory files need special handling for passwords
+    # Passwords with special characters need to be properly escaped
+    # Use single quotes for passwords to avoid issues with double quotes and special chars
+    if target_password:
+        # Escape single quotes in password by replacing ' with '\''
+        # Then wrap in single quotes for Ansible inventory
+        escaped_password = "'" + target_password.replace("'", "'\\''") + "'"
+    else:
+        escaped_password = "''"
     
     # Determine connection type based on OS (normalize to lowercase)
     os_type = os_type.lower() if os_type else 'linux'
