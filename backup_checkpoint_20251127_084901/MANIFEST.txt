@@ -1,0 +1,36 @@
+Security Fix Checkpoint
+=======================
+Created: 2025-11-27 08:49:06
+Timestamp: 20251127_084901
+Backup Directory: /mnt/c/stackbill/Course/Node-red/stackwatch-lab/ansible/Monitoring/backup_checkpoint_20251127_084901
+
+Files Backed Up:
+- web-ui
+- playbooks
+- scripts
+- prometheus
+- start-application.sh
+- requirements.txt
+- .gitignore
+- config.yml.example
+
+Purpose:
+This checkpoint was created before applying security fixes to the application.
+If security fixes cause issues, use RESTORE.sh to revert all changes.
+
+To Restore:
+1. cd to the backup directory: /mnt/c/stackbill/Course/Node-red/stackwatch-lab/ansible/Monitoring/backup_checkpoint_20251127_084901
+2. Run: ./RESTORE.sh
+3. Follow the prompts
+
+Security Fixes Planned:
+- Authentication/Authorization implementation
+- Input validation and sanitization
+- CSRF protection
+- Path traversal fixes
+- Command injection prevention
+- Security headers
+- Error handling improvements
+- Rate limiting
+
+Note: Database files (servers.db) are NOT backed up as they contain runtime data.

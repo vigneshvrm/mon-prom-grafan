@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Certificates and Keys
+certs/*.crt
+certs/*.key
+certs/*.pem
+*.crt
+*.key
+*.pem
+*.pfx
+
+# Configuration files with passwords
+config.yml
+*.secret
+
+# Ansible
+*.retry
+.vault_pass
+ansible.cfg.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+web-ui/uploads/*
+!web-ui/uploads/.gitkeep
+
+# Temporary files
+tmp/*
+!tmp/.gitkeep
+*.tmp
+
+# Prometheus binaries (using containers instead)
+**/prometheus-*.tar.gz
+**/prometheus-*/
+!prometheus-config/
+!prometheus-data/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+web-ui/servers.db
