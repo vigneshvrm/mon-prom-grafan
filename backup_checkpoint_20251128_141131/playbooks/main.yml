@@ -1,0 +1,31 @@
+---
+# Main orchestration playbook
+# Routes to appropriate installation playbook based on OS
+# target_os is passed as an extra var from Flask backend (normalized to lowercase)
+
+- name: Debug OS routing
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show routing information
+      debug:
+        msg:
+          - "Target OS from extra vars: {{ target_os | default('not_set') }}"
+          - "Will route to: {{ 'Windows' if (target_os | default('linux') | string | lower) == 'windows' else 'Linux' }}"
+
+# Import Linux playbook when target_os is not 'windows'
+# Using target_os directly from extra vars with default fallback
+- name: Install Node Exporter on Linux
+  import_playbook: linux-node-exporter.yml
+  when: (target_os | default('linux') | string | lower) != 'windows'
+
+# Import WinRM configuration for Windows (only if WinRM is not accessible)
+# If WinRM is already configured and accessible, this playbook will skip configuration
+- name: Configure WinRM for Windows (if needed)
+  import_playbook: configure-winrm.yml
+  when: (target_os | default('linux') | string | lower) == 'windows'
+
+# Import Windows playbook
+- name: Install Windows Exporter
+  import_playbook: windows-node-exporter.yml
+  when: (target_os | default('linux') | string | lower) == 'windows'

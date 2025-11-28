@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Exporter Secure Installation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 700px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-section {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 20px;
+            background: #667eea;
+            border-radius: 2px;
+        }
+
+        .section-description {
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 15px;
+            padding-left: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        label.required::after {
+            content: ' *';
+            color: #e74c3c;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .password-container {
+            position: relative;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            font-size: 14px;
+            padding: 5px;
+        }
+
+        .toggle-password:hover {
+            color: #333;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            margin-top: 10px;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-message {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .cancel-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #f5576c;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .cancel-btn:hover {
+            background: #e0485c;
+        }
+
+        .output {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            display: none;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+
+        .output pre {
+            margin: 0;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 12px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #0d47a1;
+        }
+
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Node Exporter Installer</h1>
+        <p class="subtitle">Automated Node Exporter installation with Prometheus integration</p>
+
+        <div id="alert" class="alert"></div>
+
+        <form id="installForm">
+            <!-- Section 1: Target Server Credentials -->
+            <div class="form-section">
+                <div class="section-title">1. Target Server Credentials</div>
+                <div class="section-description">
+                    Credentials to connect to the server where Node Exporter will be installed (SSH for Linux, WinRM for Windows)
+                </div>
+
+                <div class="form-group">
+                    <label for="target_host" class="required">Target Server IP/Hostname</label>
+                    <input type="text" id="target_host" name="target_host" placeholder="192.168.1.100" required>
+                    <div class="help-text">IP address or hostname of the target server</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="target_username" class="required">SSH/WinRM Username</label>
+                        <input type="text" id="target_username" name="target_username" placeholder="ubuntu or Administrator" required>
+                        <div class="help-text">Username for SSH (Linux) or WinRM (Windows)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="target_password" class="required">SSH/WinRM Password</label>
+                        <div class="password-container">
+                            <input type="password" id="target_password" name="target_password" required>
+                            <button type="button" class="toggle-password" onclick="togglePassword('target_password')">👁️</button>
+                        </div>
+                        <div class="help-text">Password to connect to target server</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="os" class="required">Operating System</label>
+                    <select id="os" name="os" required>
+                        <option value="auto">Auto-detect</option>
+                        <option value="linux">Linux</option>
+                        <option value="windows">Windows</option>
+                    </select>
+                    <div class="help-text">Operating system of the target server</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="inventory">Inventory File (Optional)</label>
+                    <input type="text" id="inventory" name="inventory" value="hosts.yml">
+                    <div class="help-text">Inventory file path (default: hosts.yml in parent directory)</div>
+                </div>
+            </div>
+
+            <!-- Section 2: Prometheus Server Settings -->
+            <div class="form-section">
+                <div class="section-title">2. Prometheus Server Settings</div>
+                <div class="section-description">
+                    Configuration for the centralized Prometheus server (where this web application is running)
+                </div>
+
+                <div id="prometheus-status-box" class="info-box" style="display: none;">
+                    <strong>📊 Prometheus Status:</strong> <span id="prometheus-status-text">Checking...</span>
+                </div>
+
+                <div class="info-box">
+                    <strong>ℹ️ Note:</strong> This web application runs on your centralized Prometheus server. 
+                    After installation, the new node will be automatically added to Prometheus configuration.
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="prometheus_enabled" name="prometheus_enabled" checked>
+                        Automatically configure Prometheus
+                    </label>
+                    <div class="help-text">Add this node to Prometheus scrape configuration automatically</div>
+                </div>
+
+                <div id="prometheus-settings">
+                    <div class="form-group">
+                        <label for="prometheus_config_path">Prometheus Config Path</label>
+                        <input type="text" id="prometheus_config_path" name="prometheus_config_path" placeholder="Auto-detected from Prometheus status">
+                        <div class="help-text">Path to prometheus.yml file (auto-detected if Prometheus is running)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="prometheus_reload_api">Prometheus Reload API</label>
+                        <input type="text" id="prometheus_reload_api" name="prometheus_reload_api" placeholder="http://localhost:9090/-/reload">
+                        <div class="help-text">Prometheus reload API URL for automatic reload (default: http://localhost:9090/-/reload)</div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn" id="installBtn">🚀 Install Node Exporter</button>
+            <button type="button" class="btn btn-secondary" onclick="validateForm()">✓ Validate Configuration</button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p id="loading-message">Installing Node Exporter...</p>
+            <div class="status-message" id="status-message">This may take a few minutes. Please wait...</div>
+            <button class="cancel-btn" id="cancelBtn" onclick="cancelInstallation()" style="display: none;">Cancel</button>
+        </div>
+
+        <div class="output" id="output">
+            <pre id="outputContent"></pre>
+        </div>
+    </div>
+
+    <script>
+        function togglePassword(fieldId) {
+            const passwordInput = document.getElementById(fieldId);
+            const toggleBtn = passwordInput.nextElementSibling;
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleBtn.textContent = '🙈';
+            } else {
+                passwordInput.type = 'password';
+                toggleBtn.textContent = '👁️';
+            }
+        }
+
+        function showAlert(message, type = 'info') {
+            const alert = document.getElementById('alert');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.display = 'block';
+            
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        }
+
+        let installationTimeout = null;
+        let statusUpdateInterval = null;
+        let elapsedSeconds = 0;
+
+        function showLoading(show = true) {
+            const loadingEl = document.getElementById('loading');
+            const loadingMsg = document.getElementById('loading-message');
+            const statusMsg = document.getElementById('status-message');
+            const cancelBtn = document.getElementById('cancelBtn');
+            
+            loadingEl.style.display = show ? 'block' : 'none';
+            document.getElementById('installBtn').disabled = show;
+            
+            if (show) {
+                elapsedSeconds = 0;
+                loadingMsg.textContent = 'Installing Node Exporter...';
+                statusMsg.textContent = 'This may take a few minutes. Please wait...';
+                cancelBtn.style.display = 'none'; // Can't cancel HTTP request, but show for UX
+                
+                // Update status message every 10 seconds
+                statusUpdateInterval = setInterval(() => {
+                    elapsedSeconds += 10;
+                    const minutes = Math.floor(elapsedSeconds / 60);
+                    const seconds = elapsedSeconds % 60;
+                    statusMsg.textContent = `Installing... (${minutes}m ${seconds}s elapsed). This may take a few minutes.`;
+                }, 10000);
+                
+                // Set a timeout warning
+                installationTimeout = setTimeout(() => {
+                    statusMsg.textContent = 'Installation is taking longer than expected. Please check server connectivity or wait a bit more.';
+                    cancelBtn.style.display = 'inline-block';
+                }, 600000); // 10 minutes
+            } else {
+                if (statusUpdateInterval) {
+                    clearInterval(statusUpdateInterval);
+                    statusUpdateInterval = null;
+                }
+                if (installationTimeout) {
+                    clearTimeout(installationTimeout);
+                    installationTimeout = null;
+                }
+                cancelBtn.style.display = 'none';
+            }
+        }
+
+        function cancelInstallation() {
+            // Note: HTTP requests can't be cancelled from client side easily
+            // But we can show a message and reload the page
+            if (confirm('Cancel installation? The process may continue on the server, but you can check the status later.')) {
+                location.reload();
+            }
+        }
+
+        function showOutput(content, show = true) {
+            const output = document.getElementById('output');
+            const outputContent = document.getElementById('outputContent');
+            outputContent.textContent = content;
+            output.style.display = show ? 'block' : 'none';
+        }
+
+        async function validateForm() {
+            const form = document.getElementById('installForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            // Map new field names to backend expected names
+            data.os = data.os || 'auto';
+
+            try {
+                const response = await fetch('/api/validate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.valid) {
+                    showAlert('✓ Configuration is valid!', 'success');
+                } else {
+                    showAlert('✗ Validation failed: ' + (result.error || result.errors.join(', ')), 'error');
+                }
+            } catch (error) {
+                showAlert('✗ Error: ' + error.message, 'error');
+            }
+        }
+
+        document.getElementById('prometheus_enabled').addEventListener('change', function() {
+            const prometheusSettings = document.getElementById('prometheus-settings');
+            prometheusSettings.style.display = this.checked ? 'block' : 'none';
+            
+            // Make config path required if enabled
+            const configPath = document.getElementById('prometheus_config_path');
+            configPath.required = this.checked;
+        });
+
+        document.getElementById('installForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const form = document.getElementById('installForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            // Map form fields to backend expected format
+            data.os = data.os || 'auto';
+            data.target_host = data.target_host || '';
+            data.target_username = data.target_username || '';
+            data.target_password = data.target_password || '';
+            data.prometheus_enabled = document.getElementById('prometheus_enabled').checked;
+
+            showLoading(true);
+            showOutput('', false);
+            showAlert('Starting installation...', 'info');
+
+            try {
+                const response = await fetch('/api/install', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                showLoading(false);
+
+                if (result.success) {
+                    let message = '✓ Installation completed successfully!';
+                    if (result.prometheus_updated) {
+                        message += ' ✓ Prometheus configuration updated!';
+                    }
+                    if (result.node_info) {
+                        message += ` ✓ Node detected: ${result.node_info.hostname} (${result.node_info.ip_address}:${result.node_info.port})`;
+                    }
+                    showAlert(message, 'success');
+                    
+                    let output = '=== INSTALLATION SUCCESSFUL ===\n\n';
+                    if (result.stdout) {
+                        output += 'STDOUT:\n' + result.stdout + '\n\n';
+                    }
+                    if (result.stderr && result.stderr.trim()) {
+                        output += 'STDERR:\n' + result.stderr + '\n\n';
+                    }
+                    if (result.node_info) {
+                        output += '=== NODE INFORMATION ===\n' + JSON.stringify(result.node_info, null, 2) + '\n\n';
+                    }
+                    if (result.prometheus_updated) {
+                        output += '=== PROMETHEUS CONFIGURATION ===\nPrometheus configuration has been updated successfully!\n';
+                    }
+                    showOutput(output, true);
+                } else {
+                    // Always show output when there's an error
+                    let errorMsg = result.error || 'Installation failed. Check output below for details.';
+                    showAlert('✗ ' + errorMsg, 'error');
+                    
+                    let output = '=== INSTALLATION FAILED ===\n\n';
+                    output += 'Return Code: ' + (result.returncode || 'Unknown') + '\n\n';
+                    
+                    if (result.error) {
+                        output += 'ERROR: ' + result.error + '\n\n';
+                    }
+                    
+                    if (result.stdout) {
+                        output += 'STDOUT:\n' + result.stdout + '\n\n';
+                    }
+                    
+                    if (result.stderr) {
+                        output += 'STDERR:\n' + result.stderr + '\n\n';
+                    }
+                    
+                    // Show last part of full output if available
+                    if (result.stdout_full && result.stdout_full.length > result.stdout.length) {
+                        output += '\n=== FULL OUTPUT (last 50 lines shown above, full output below) ===\n';
+                        output += result.stdout_full + '\n\n';
+                    }
+                    
+                    if (result.stderr_full && result.stderr_full.length > result.stderr.length) {
+                        output += '=== FULL STDERR ===\n';
+                        output += result.stderr_full + '\n\n';
+                    }
+                    
+                    showOutput(output, true);
+                }
+            } catch (error) {
+                showLoading(false);
+                let errorMsg = 'Network error or server timeout: ' + error.message;
+                showAlert('✗ ' + errorMsg, 'error');
+                showOutput('=== ERROR ===\n\n' + errorMsg + '\n\n' + 
+                    'Possible causes:\n' +
+                    '1. Server is not responding\n' +
+                    '2. Network timeout\n' +
+                    '3. Installation took too long\n' +
+                    '\nPlease check the server logs or try again.', true);
+            }
+        });
+
+        // Show Prometheus settings by default if checkbox is checked
+        if (document.getElementById('prometheus_enabled').checked) {
+            document.getElementById('prometheus-settings').style.display = 'block';
+        }
+
+        // Check Prometheus status on page load
+        async function checkPrometheusStatus() {
+            try {
+                const response = await fetch('/api/prometheus-status');
+                const status = await response.json();
+                
+                const statusBox = document.getElementById('prometheus-status-box');
+                const statusText = document.getElementById('prometheus-status-text');
+                
+                if (status.running) {
+                    statusBox.style.display = 'block';
+                    statusBox.style.background = '#d4edda';
+                    statusBox.style.borderLeftColor = '#28a745';
+                    statusText.innerHTML = `✓ Running (${status.type}) | UI: <a href="http://localhost:9090" target="_blank">http://localhost:9090</a>`;
+                    
+                    // Auto-fill config path if available
+                    if (status.config_path && !document.getElementById('prometheus_config_path').value) {
+                        document.getElementById('prometheus_config_path').value = status.config_path;
+                    }
+                    if (status.reload_api && !document.getElementById('prometheus_reload_api').value) {
+                        document.getElementById('prometheus_reload_api').value = status.reload_api;
+                    }
+                } else {
+                    statusBox.style.display = 'block';
+                    statusBox.style.background = '#fff3cd';
+                    statusBox.style.borderLeftColor = '#ffc107';
+                    statusText.innerHTML = '⚠️ Prometheus is not running. The application will still work, but auto-configuration may fail.';
+                }
+            } catch (error) {
+                console.error('Error checking Prometheus status:', error);
+            }
+        }
+
+        // Check status on page load
+        checkPrometheusStatus();
+    </script>
+</body>
+</html>

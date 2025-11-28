@@ -1,117 +1,84 @@
 import React from 'react';
 import { MonitoredServer, ServerStatus } from '../types';
-import { Server, Terminal, Activity, ShieldCheck, Clock, Network, MoreVertical } from 'lucide-react';
+import { Server, Activity, ShieldCheck, Clock, Trash2, BarChart3 } from 'lucide-react';
 
 interface ServerCardProps {
   server: MonitoredServer;
+  onDelete: (id: string) => void;
+  onViewMetrics: (server: MonitoredServer) => void;
 }
 
-export const ServerCard: React.FC<ServerCardProps> = ({ server }) => {
-  const getStatusConfig = () => {
-    switch (server.status) {
-      case ServerStatus.ONLINE:
-        return {
-          bg: 'from-emerald-500/10 to-emerald-600/5',
-          border: 'border-emerald-500/30',
-          text: 'text-emerald-400',
-          icon: 'bg-emerald-500/20',
-          badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-          pulse: false
-        };
-      case ServerStatus.CONFIGURING:
-        return {
-          bg: 'from-blue-500/10 to-blue-600/5',
-          border: 'border-blue-500/30',
-          text: 'text-blue-400',
-          icon: 'bg-blue-500/20',
-          badge: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
-          pulse: true
-        };
-      default:
-        return {
-          bg: 'from-red-500/10 to-red-600/5',
-          border: 'border-red-500/30',
-          text: 'text-red-400',
-          icon: 'bg-red-500/20',
-          badge: 'bg-red-500/10 text-red-400 border-red-500/30',
-          pulse: false
-        };
+export const ServerCard: React.FC<ServerCardProps> = ({ server, onDelete, onViewMetrics }) => {
+  const isConfiguring = server.status === ServerStatus.CONFIGURING;
+
+  const handleDelete = () => {
+    if (window.confirm(`Are you sure you want to remove server "${server.name}"? This action cannot be undone.`)) {
+      onDelete(server.id);
     }
   };
 
-  const statusConfig = getStatusConfig();
-
   return (
-    <div className={`group relative bg-gradient-to-br ${statusConfig.bg} rounded-2xl border ${statusConfig.border} hover:border-opacity-60 transition-all duration-300 p-6 flex items-center justify-between shadow-lg hover:shadow-xl hover:-translate-y-1 overflow-hidden`}>
-      {/* Animated background gradient on hover */}
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-purple-500/0 to-pink-500/0 group-hover:from-blue-500/5 group-hover:via-purple-500/5 group-hover:to-pink-500/5 transition-all duration-500 opacity-0 group-hover:opacity-100" />
-      
-      <div className="relative flex items-center gap-6 flex-1 min-w-0">
+    <div className={`bg-slate-800 rounded-xl border transition-all p-5 flex items-center justify-between group shadow-sm ${
+      isConfiguring 
+        ? 'border-blue-500/40 shadow-[0_0_15px_rgba(59,130,246,0.1)] animate-pulse' 
+        : 'border-slate-700 hover:border-slate-600'
+    }`}>
+      <div className="flex items-center gap-5">
         {/* Status Icon */}
-        <div className={`flex-shrink-0 p-4 rounded-xl ${statusConfig.icon} ${statusConfig.text} transition-transform group-hover:scale-110 duration-300 ${statusConfig.pulse ? 'animate-pulse' : ''}`}>
-          {server.status === ServerStatus.ONLINE ? (
-            <Server className="w-7 h-7" />
-          ) : (
-            <Activity className="w-7 h-7" />
-          )}
+        <div className={`p-3 rounded-xl transition-colors ${
+          server.status === ServerStatus.ONLINE ? 'bg-emerald-500/10 text-emerald-400' :
+          server.status === ServerStatus.CONFIGURING ? 'bg-blue-500/10 text-blue-400' :
+          'bg-red-500/10 text-red-400'
+        }`}>
+          {server.status === ServerStatus.ONLINE ? <Server className="w-6 h-6" /> : <Activity className="w-6 h-6" />}
         </div>
 
         {/* Server Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-2">
-            <h3 className="font-bold text-slate-100 text-xl leading-tight tracking-tight truncate">
-              {server.name}
-            </h3>
-            {server.status === ServerStatus.ONLINE && (
-              <div className="flex-shrink-0 w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-lg shadow-emerald-400/50" />
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
-            <span className="flex items-center gap-2 font-mono">
-              <Network className="w-4 h-4 text-slate-500" />
-              <span className="text-slate-500 font-semibold">HOST:</span>
-              <span className="text-slate-300">{server.ip}:{server.port}</span>
+        <div>
+          <h3 className="font-bold text-slate-100 text-lg leading-tight tracking-tight">{server.name}</h3>
+          <div className="flex items-center gap-3 text-sm text-slate-400 mt-1.5 font-mono">
+            <span className="flex items-center gap-1.5">
+               <span className="text-slate-500">HOST:</span>
+               {server.ip}:{server.port}
             </span>
             <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-            <span className="flex items-center gap-2">
-              <span className="text-slate-500 font-semibold">OS:</span>
-              <span className="text-slate-300 font-medium">{server.os}</span>
-            </span>
-            <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-            <span className="flex items-center gap-2">
-              <span className="text-slate-500 font-semibold">USER:</span>
-              <span className="text-slate-300 font-mono">{server.sshUser}</span>
+            <span className="flex items-center gap-1.5">
+               <span className="text-slate-500">OS:</span>
+               {server.os}
             </span>
           </div>
         </div>
       </div>
 
       {/* Status Badge & Actions */}
-      <div className="relative flex items-center gap-4 flex-shrink-0">
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border ${statusConfig.badge} shadow-lg backdrop-blur-sm`}>
-          {server.status === ServerStatus.ONLINE ? (
-            <ShieldCheck className="w-4 h-4" />
-          ) : (
-            <Clock className="w-4 h-4" />
-          )}
+      <div className="flex items-center gap-6">
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border ${
+          server.status === ServerStatus.ONLINE ? 'bg-emerald-500/5 text-emerald-400 border-emerald-500/20' :
+          server.status === ServerStatus.CONFIGURING ? 'bg-blue-500/5 text-blue-400 border-blue-500/20' :
+          'bg-red-500/5 text-red-400 border-red-500/20'
+        }`}>
+          {server.status === ServerStatus.ONLINE ? <ShieldCheck className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
           <span>{server.status}</span>
         </div>
 
-        <div className="h-10 w-px bg-slate-700/50 mx-1 hidden sm:block"></div>
+        <div className="h-8 w-px bg-slate-700 mx-1 hidden sm:block"></div>
 
-        <div className="flex items-center gap-2">
-          <button 
-            className="p-2.5 text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 group/btn" 
-            title="View Logs"
-          >
-            <Terminal className="w-5 h-5 group-hover/btn:text-blue-400 transition-colors" />
-          </button>
-          <button 
-            className="p-2.5 text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95 group/btn" 
-            title="More Options"
-          >
-            <MoreVertical className="w-5 h-5 group-hover/btn:text-slate-300 transition-colors" />
-          </button>
+        <div className="flex items-center gap-1">
+            <button
+                onClick={() => onViewMetrics(server)}
+                disabled={isConfiguring}
+                className="p-2 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                title="View Graphite Metrics"
+            >
+              <BarChart3 className="w-5 h-5" />
+            </button>
+            <button
+                onClick={handleDelete}
+                className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                title="Delete Server"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
         </div>
       </div>
     </div>

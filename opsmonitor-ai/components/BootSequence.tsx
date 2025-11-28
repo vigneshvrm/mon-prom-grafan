@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BootStep } from '../types';
-import { CheckCircle, Circle, Loader2, Terminal } from 'lucide-react';
+import { CheckCircle, Circle, Loader2, Terminal, XCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { api } from '../services/apiConnector';
 
 interface BootSequenceProps {
   onComplete: () => void;
@@ -9,129 +10,146 @@ interface BootSequenceProps {
 const INITIAL_STEPS: BootStep[] = [
   { id: 1, message: "Checking System Dependencies...", status: 'pending' },
   { id: 2, message: "Verifying Podman Installation...", status: 'pending' },
-  { id: 3, message: "Podman not found. Installing Podman...", status: 'pending' },
-  { id: 4, message: "Initializing Container Runtime...", status: 'pending' },
-  { id: 5, message: "Checking Prometheus Service Status...", status: 'pending' },
-  { id: 6, message: "Starting Prometheus Container...", status: 'pending' },
-  { id: 7, message: "Verifying Frontend Connection...", status: 'pending' },
+  { id: 3, message: "Initializing Container Runtime...", status: 'pending' },
+  { id: 4, message: "Checking Prometheus Service Status...", status: 'pending' },
+  { id: 5, message: "Verifying Frontend Connection...", status: 'pending' },
 ];
 
 export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
   const [steps, setSteps] = useState<BootStep[]>(INITIAL_STEPS);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [hasError, setHasError] = useState(false);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
+    if (hasError) return;
+
     if (currentStepIndex >= steps.length) {
-      setTimeout(onComplete, 1000); // Give a moment to see all green
+      setTimeout(onComplete, 800);
       return;
     }
 
     const timer = setTimeout(() => {
+      // 1. Mark current step as running
       setSteps(prev => {
         const newSteps = [...prev];
-        // Mark current as running
         newSteps[currentStepIndex].status = 'running';
-        
-        // If not first step, mark previous as completed
         if (currentStepIndex > 0) {
           newSteps[currentStepIndex - 1].status = 'completed';
         }
         return newSteps;
       });
 
-      // Simulate duration for step completion
-      setTimeout(() => {
-        setSteps(prev => {
-           const newSteps = [...prev];
-           newSteps[currentStepIndex].status = 'completed';
-           return newSteps;
-        });
-        setCurrentStepIndex(prev => prev + 1);
-      }, 1200); // 1.2 seconds per step simulation
+      // 2. Perform Check (Using API Connector)
+      const performCheck = async () => {
+          try {
+              // SIMULATION: Simulate Podman missing on the very first run
+              // Step 1 is "Verifying Podman..."
+              if (currentStepIndex === 1) {
+                  // We simulate a backend call here
+                  await api.systemCheck();
+                  
+                  if (retryCount === 0) {
+                      throw new Error("Critical Error: 'podman' command not found in PATH.");
+                  }
+              } else {
+                  // Normal delay for other steps
+                  await new Promise(resolve => setTimeout(resolve, 600));
+              }
+
+              // Success Path
+              setSteps(prev => {
+                const newSteps = [...prev];
+                newSteps[currentStepIndex].status = 'completed';
+                return newSteps;
+              });
+              setCurrentStepIndex(prev => prev + 1);
+
+          } catch (err: any) {
+              setSteps(prev => {
+                const newSteps = [...prev];
+                newSteps[currentStepIndex].status = 'failed';
+                return newSteps;
+            });
+            setHasError(true);
+            setErrorDetails(err.message || "Unknown system error");
+          }
+      };
+
+      performCheck();
 
     }, 100);
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStepIndex]);
+  }, [currentStepIndex, retryCount, hasError]);
+
+  const handleRetry = () => {
+    setHasError(false);
+    setErrorDetails(null);
+    setRetryCount(prev => prev + 1);
+
+    setSteps(prev => {
+        const newSteps = [...prev];
+        newSteps[currentStepIndex].status = 'pending';
+        return newSteps;
+    });
+  };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center z-50 p-4">
-      {/* Animated background */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-      </div>
-      
-      <div className="relative w-full max-w-lg bg-gradient-to-br from-slate-800/95 to-slate-800/90 rounded-3xl border border-slate-700/50 shadow-2xl overflow-hidden backdrop-blur-xl fade-in zoom-in">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-slate-950/90 to-slate-900/80 px-6 py-4 border-b border-slate-700/50 flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/20 rounded-lg border border-emerald-500/30">
-            <Terminal className="w-5 h-5 text-emerald-400" />
-          </div>
-          <div>
-            <h2 className="text-slate-100 font-bold text-base">System Boot Protocol</h2>
-            <p className="text-xs text-slate-500 font-mono">Initializing monitoring infrastructure...</p>
-          </div>
+    <div className="fixed inset-0 bg-slate-900 flex flex-col items-center justify-center z-50 p-4">
+      <div className={`w-full max-w-md bg-slate-800 rounded-xl border shadow-2xl overflow-hidden transition-colors ${hasError ? 'border-red-500/50' : 'border-slate-700'}`}>
+        <div className="bg-slate-950 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+          <Terminal className={`w-5 h-5 ${hasError ? 'text-red-500' : 'text-emerald-400'}`} />
+          <h2 className="text-slate-100 font-mono text-sm font-semibold">System Boot Protocol</h2>
         </div>
         
-        {/* Steps */}
-        <div className="p-8 space-y-5 bg-gradient-to-b from-slate-800/50 to-slate-800/30">
-          {steps.map((step, index) => (
-            <div 
-              key={step.id} 
-              className="flex items-center gap-4 group transition-all duration-300"
-              style={{ 
-                animationDelay: `${index * 100}ms`,
-                opacity: step.status === 'pending' ? 0.5 : 1
-              }}
-            >
-              <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center">
-                {step.status === 'pending' && (
-                  <Circle className="w-6 h-6 text-slate-600" />
-                )}
-                {step.status === 'running' && (
-                  <div className="relative">
-                    <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
-                    <div className="absolute inset-0 w-6 h-6 border-2 border-blue-400/30 rounded-full animate-ping"></div>
-                  </div>
-                )}
-                {step.status === 'completed' && (
-                  <div className="relative">
-                    <CheckCircle className="w-6 h-6 text-emerald-500 zoom-in" />
-                    <div className="absolute inset-0 w-6 h-6 bg-emerald-500/20 rounded-full animate-ping"></div>
-                  </div>
-                )}
+        <div className="p-6 space-y-5">
+          {steps.map((step) => (
+            <div key={step.id} className="flex items-center gap-3">
+              <div className="flex-shrink-0 w-6">
+                {step.status === 'pending' && <Circle className="w-5 h-5 text-slate-600" />}
+                {step.status === 'running' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+                {step.status === 'completed' && <CheckCircle className="w-5 h-5 text-emerald-500" />}
+                {step.status === 'failed' && <XCircle className="w-5 h-5 text-red-500" />}
               </div>
-              <span className={`font-mono text-sm transition-all duration-300 ${
+              <span className={`font-mono text-sm ${
                 step.status === 'pending' ? 'text-slate-500' : 
-                step.status === 'running' ? 'text-blue-300 font-semibold' : 'text-slate-200 font-medium'
+                step.status === 'running' ? 'text-blue-200' : 
+                step.status === 'failed' ? 'text-red-400 font-bold' : 'text-slate-200'
               }`}>
                 {step.message}
               </span>
-              {step.status === 'running' && (
-                <div className="ml-auto flex gap-1.5">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-              )}
             </div>
           ))}
+
+          {hasError && (
+              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                      <div>
+                          <h3 className="text-sm font-bold text-red-400">Startup Failed</h3>
+                          <p className="text-xs text-red-300/80 mt-1 font-mono leading-relaxed">
+                              {errorDetails}
+                          </p>
+                      </div>
+                  </div>
+                  <button 
+                    onClick={handleRetry}
+                    className="mt-4 w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                      <RefreshCw className="w-4 h-4" />
+                      Refresh & Retry
+                  </button>
+              </div>
+          )}
         </div>
         
-        {/* Footer */}
-        <div className="bg-gradient-to-r from-slate-900/80 to-slate-800/60 px-6 py-4 border-t border-slate-700/50">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500 font-mono">
-              <span className="text-slate-400">OpsMonitor AI</span> v1.0.0
-            </p>
-            <div className="flex gap-1">
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></div>
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '200ms' }}></div>
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '400ms' }}></div>
-            </div>
-          </div>
+        <div className="bg-slate-900/50 px-6 py-4 border-t border-slate-700">
+          <p className="text-xs text-slate-500 text-center font-mono">
+             OpsMonitor AI v1.0.0 (System Check)
+          </p>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { OsFamily, MonitoredServer, ServerStatus } from '../types';
-import { generateAnsiblePlaybook, generatePrometheusConfig } from '../services/geminiService';
+import { OsFamily, MonitoredServer } from '../types';
+import { api } from '../services/apiConnector';
 import { X, Server, Play, Loader2, Lock } from 'lucide-react';
 
 interface AddServerModalProps {
@@ -22,7 +22,6 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
   
   const [isDeploying, setIsDeploying] = useState(false);
 
-  // Set default port based on OS selection
   useEffect(() => {
     if (osFamily === OsFamily.LINUX) {
       setFormData(prev => ({ ...prev, port: '22', sshUser: 'root' }));
@@ -39,32 +38,25 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
     setIsDeploying(true);
     
     try {
-        // Generate configs in background to simulate "Automated Setup"
-        // Note: Password would be passed to Ansible here in a real app
-        const [ansible, prometheus] = await Promise.all([
-            generateAnsiblePlaybook(osFamily, formData.ip, formData.port, formData.sshUser),
-            generatePrometheusConfig(formData.ip, formData.port, formData.name)
-        ]);
+        // 1. Generate Configs (API Connector)
+        const configs = await api.generateConfigs(
+            osFamily, 
+            formData.ip, 
+            formData.port, 
+            formData.sshUser, 
+            formData.name
+        );
 
-        // Simulate Network Latency / Ansible Execution Time
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const newServer: MonitoredServer = {
-            id: Date.now().toString(),
+        // 2. Create Node & Deploy (API Connector)
+        const newServer = await api.createNode({
             name: formData.name,
             ip: formData.ip,
             port: parseInt(formData.port, 10),
-            os: osFamily,
             sshUser: formData.sshUser,
-            status: ServerStatus.ONLINE, 
-            metrics: {
-                cpu: [], // No metrics needed for initial view
-                memory: [],
-                timestamps: []
-            },
-            ansiblePlaybook: ansible,
-            prometheusConfig: prometheus
-        };
+            password: formData.password,
+            os: osFamily,
+            configs: configs
+        });
 
         onAdd(newServer);
         handleClose();
@@ -86,116 +78,92 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
   const isFormValid = formData.name && formData.ip && formData.port;
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in">
-      <div className="bg-gradient-to-br from-slate-800 to-slate-800/95 w-full max-w-2xl rounded-3xl border border-slate-700/50 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden backdrop-blur-xl">
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-800/30">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl border border-blue-500/30">
+        <div className="flex items-center justify-between p-6 border-b border-slate-700">
+          <div>
+            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
               <Server className="w-6 h-6 text-blue-400" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
-                Add Monitored Node
-              </h2>
-              <p className="text-slate-400 text-sm mt-1">Configure target server to install Node Exporter agent</p>
-            </div>
+              Add Monitored Node
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">Configure target to install Node Exporter</p>
           </div>
-          <button 
-            onClick={handleClose} 
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-xl transition-all duration-200 hover:scale-110 active:scale-95"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={handleClose} className="text-slate-400 hover:text-slate-200 transition-colors">
+            <X className="w-6 h-6" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-8">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
             
             {/* 1. OS Selection */}
-            <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/50 p-6 rounded-2xl border border-slate-700/50 space-y-4 shadow-lg">
-              <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
-                Operating System
-              </h3>
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 space-y-3">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Operating System</h3>
               
               <div className="grid grid-cols-2 gap-4">
                  <button
                    onClick={() => setOsFamily(OsFamily.LINUX)}
-                   className={`group flex flex-col items-center justify-center gap-3 p-5 rounded-xl border-2 transition-all duration-200 ${
+                   className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${
                      osFamily === OsFamily.LINUX 
-                     ? 'bg-gradient-to-br from-blue-600/30 to-blue-500/20 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20 scale-105' 
-                     : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600 hover:bg-slate-800 hover:scale-[1.02]'
+                     ? 'bg-blue-600/20 border-blue-500 text-blue-100' 
+                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                    }`}
                  >
-                   <div className={`p-2 rounded-lg ${osFamily === OsFamily.LINUX ? 'bg-blue-500/20' : 'bg-slate-700/50'}`}>
-                     <Server className="w-6 h-6" />
-                   </div>
-                   <span className="font-bold text-base">Linux</span>
-                   <span className="text-xs text-slate-500">SSH Port 22</span>
+                   <span className="font-semibold">Linux</span>
                  </button>
                  <button
                    onClick={() => setOsFamily(OsFamily.WINDOWS)}
-                   className={`group flex flex-col items-center justify-center gap-3 p-5 rounded-xl border-2 transition-all duration-200 ${
+                   className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${
                      osFamily === OsFamily.WINDOWS
-                     ? 'bg-gradient-to-br from-blue-600/30 to-blue-500/20 border-blue-500 text-blue-100 shadow-lg shadow-blue-500/20 scale-105' 
-                     : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600 hover:bg-slate-800 hover:scale-[1.02]'
+                     ? 'bg-blue-600/20 border-blue-500 text-blue-100' 
+                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                    }`}
                  >
-                   <div className={`p-2 rounded-lg ${osFamily === OsFamily.WINDOWS ? 'bg-blue-500/20' : 'bg-slate-700/50'}`}>
-                     <Server className="w-6 h-6" />
-                   </div>
-                   <span className="font-bold text-base">Windows</span>
-                   <span className="text-xs text-slate-500">WinRM Port 5986</span>
+                   <span className="font-semibold">Windows</span>
                  </button>
               </div>
             </div>
 
             {/* 2. Server Details */}
-            <div className="space-y-6">
+            <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
-                    Display Name
-                  </label>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">Display Name</label>
                   <input 
                       type="text" 
                       value={formData.name}
                       onChange={e => setFormData({...formData, name: e.target.value})}
-                      placeholder="e.g. Production Web Server 01"
-                      className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-4 py-3.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 font-medium"
+                      placeholder="e.g. Production Web 01"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 
-                <div className="grid grid-cols-12 gap-4">
+                <div className="grid grid-cols-12 gap-3">
                   <div className="col-span-8">
-                      <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
-                        IP Address
-                      </label>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">IP Address</label>
                       <input 
                       type="text" 
                       value={formData.ip}
                       onChange={e => setFormData({...formData, ip: e.target.value})}
                       placeholder="192.168.1.10"
-                      className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-4 py-3.5 text-slate-100 placeholder:text-slate-600 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                   </div>
                   <div className="col-span-4">
-                      <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
-                        Port
-                      </label>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Port</label>
                       <input 
                       type="number" 
                       value={formData.port}
                       onChange={e => setFormData({...formData, port: e.target.value})}
                       placeholder="22"
-                      className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-4 py-3.5 text-slate-100 placeholder:text-slate-600 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                        <label className="block text-sm font-medium text-slate-300 mb-1">
                             {osFamily === OsFamily.WINDOWS ? 'Administrator User' : 'SSH User'}
                         </label>
                         <input 
@@ -203,11 +171,11 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
                             value={formData.sshUser}
                             onChange={e => setFormData({...formData, sshUser: e.target.value})}
                             placeholder={osFamily === OsFamily.WINDOWS ? 'Administrator' : 'root'}
-                            className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-4 py-3.5 text-slate-100 placeholder:text-slate-600 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                        <label className="block text-sm font-medium text-slate-300 mb-1">
                            Password
                         </label>
                         <div className="relative">
@@ -216,52 +184,37 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
                               value={formData.password}
                               onChange={e => setFormData({...formData, password: e.target.value})}
                               placeholder="••••••••"
-                              className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl px-4 py-3.5 text-slate-100 placeholder:text-slate-600 pl-12 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 pl-10"
                           />
-                          <Lock className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
+                          <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
                         </div>
                     </div>
                 </div>
             </div>
             
-            <div className="p-4 bg-gradient-to-r from-blue-900/30 to-blue-800/20 border border-blue-500/30 rounded-xl backdrop-blur-sm">
-                <p className="text-sm text-blue-200 flex items-start gap-2">
-                    <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <span>
-                        <strong className="font-semibold">Security Note:</strong> Ansible will use these credentials to securely install and configure the Node Exporter agent on the target server.
-                    </span>
+            <div className="p-3 bg-blue-900/20 border border-blue-500/20 rounded-lg">
+                <p className="text-xs text-blue-200">
+                    <strong>Note:</strong> Ansible will use these credentials to install Node Exporter.
                 </p>
             </div>
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-slate-700/50 flex justify-end gap-3 bg-gradient-to-r from-slate-800/80 to-slate-800/50 backdrop-blur-sm">
-          <button 
-            onClick={handleClose} 
-            className="px-6 py-3 rounded-xl text-slate-300 hover:bg-slate-700/50 font-semibold transition-all duration-200 hover:scale-105 active:scale-95 border border-slate-700/50"
-          >
+        <div className="p-6 border-t border-slate-700 flex justify-end gap-3 bg-slate-800/50">
+          <button onClick={handleClose} className="px-5 py-2.5 rounded-lg text-slate-300 hover:bg-slate-700 font-medium transition-colors">
             Cancel
           </button>
           <button 
             onClick={handleDeploy}
             disabled={!isFormValid || isDeploying}
-            className={`px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all duration-200 shadow-lg ${
+            className={`px-5 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all shadow-lg ${
               !isFormValid || isDeploying
-                ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed shadow-none'
-                : 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 hover:scale-105 active:scale-95'
+                ? 'bg-slate-700 text-slate-500 cursor-not-allowed shadow-none'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20'
             }`}
           >
-            {isDeploying ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Running Ansible Playbook...</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-5 h-5 fill-current" />
-                <span>Install Agent & Monitor</span>
-              </>
-            )}
+            {isDeploying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
+            {isDeploying ? 'Running Ansible Playbook...' : 'Install Agent & Monitor'}
           </button>
         </div>
       </div>

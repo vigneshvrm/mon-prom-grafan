@@ -1,0 +1,251 @@
+---
+- name: Install Secure Node Exporter on Windows
+  hosts: windows
+  gather_facts: false
+  become: false
+
+  vars:
+    # These will be set from the frontend/CLI
+    target_os: "{{ target_os | default('auto') }}"
+    node_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    prometheus_auto_configure: "{{ prometheus_auto_configure | default(false) }}"
+    
+    windows_exporter_version: "0.31.3"
+    # Use node_exporter_port if provided, otherwise default to 9100
+    windows_exporter_port: "{{ node_exporter_port | default('9100') }}"
+    windows_exporter_install_dir: "C:\\Program Files\\windows_exporter"
+    
+    windows_pkg: "windows_exporter-{{ windows_exporter_version }}-amd64"
+    windows_url: "https://github.com/prometheus-community/windows_exporter/releases/download/v{{ windows_exporter_version }}/{{ windows_pkg }}.msi"
+    windows_installer_path: "C:\\Temp\\windows_exporter.msi"
+
+  tasks:
+    - name: Ensure temp directory exists
+      win_file:
+        path: C:\\Temp
+        state: directory
+
+
+    - name: Check if Windows Exporter is already installed
+      win_service:
+        name: windows_exporter
+      register: windows_exporter_service
+      ignore_errors: true
+
+    - name: Stop Windows Exporter service if running
+      win_service:
+        name: windows_exporter
+        state: stopped
+      when: windows_exporter_service.exists | default(false)
+
+    - name: Download Windows Exporter MSI
+      win_get_url:
+        url: "{{ windows_url }}"
+        dest: "{{ windows_installer_path }}"
+      retries: 3
+      delay: 5
+
+    - name: Install Windows Exporter MSI (silent)
+      win_package:
+        path: "{{ windows_installer_path }}"
+        state: present
+        arguments: '/quiet ENABLE_LISTENER=y LISTEN_PORT={{ windows_exporter_port }}'
+        product_id: 'windows_exporter'
+      register: windows_exporter_install
+      failed_when: false
+      
+    - name: Check if MSI installation succeeded
+      assert:
+        that:
+          - windows_exporter_install.rc == 0 or windows_exporter_install.rc == 3010
+        fail_msg: "Windows Exporter MSI installation failed. Return code: {{ windows_exporter_install.rc | default('Unknown') }}"
+        success_msg: "Windows Exporter MSI installed successfully"
+      when: windows_exporter_install.rc is defined
+
+
+    - name: Configure Windows Exporter service to start automatically
+      win_service:
+        name: windows_exporter
+        start_mode: auto
+        state: started
+      register: windows_exporter_start
+      failed_when: false
+      
+    - name: Wait for service to be ready
+      pause:
+        seconds: 5
+      when: windows_exporter_start.changed | default(false)
+
+    - name: Verify Windows Exporter service startup configuration
+      win_service:
+        name: windows_exporter
+      register: windows_exporter_service_config
+      changed_when: false
+
+    - name: Display Windows Exporter service configuration
+      debug:
+        msg:
+          - "Windows Exporter Service Configuration:"
+          - "  Service Name: windows_exporter"
+          - "  Service State: {{ windows_exporter_service_config.state | default('Unknown') }}"
+          - "  Start Mode: {{ windows_exporter_service_config.start_mode | default('Unknown') }}"
+          - "  Service Exists: {{ windows_exporter_service_config.exists | default(false) }}"
+          - "  Auto-Start on Boot: {{ 'YES' if windows_exporter_service_config.start_mode | default('') == 'auto' else 'NO - Service may not start on reboot' }}"
+
+    - name: Check if firewall rule already exists
+      win_shell: |
+        $rule = Get-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+        if ($rule) {
+          Write-Output "EXISTS"
+        } else {
+          Write-Output "NOT_EXISTS"
+        }
+      register: firewall_rule_check
+      changed_when: false
+      
+    - name: Remove existing firewall rule if it exists
+      win_shell: |
+        Remove-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+      when: firewall_rule_check.stdout == "EXISTS"
+      
+    - name: Open port in Windows Firewall (allow external access)
+      win_firewall_rule:
+        name: "Windows Exporter {{ windows_exporter_port }}"
+        localport: "{{ windows_exporter_port }}"
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: yes
+        profiles: ['domain', 'private', 'public']
+      register: firewall_rule_result
+      
+    - name: Verify firewall rule was created and enabled
+      win_shell: |
+        $rule = Get-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+        if ($rule) {
+          $enabled = ($rule | Where-Object { $_.Enabled -eq $true })
+          if ($enabled) {
+            Write-Output "ENABLED"
+          } else {
+            Write-Output "DISABLED"
+          }
+        } else {
+          Write-Output "NOT_FOUND"
+        }
+      register: firewall_rule_status
+      changed_when: false
+      
+    - name: Display firewall rule status
+      debug:
+        msg:
+          - "Firewall Rule Status: {{ firewall_rule_status.stdout }}"
+          - "If DISABLED or NOT_FOUND, port {{ windows_exporter_port }} may be blocked from external access"
+
+    - name: Wait for Windows Exporter to start
+      win_wait_for:
+        port: "{{ windows_exporter_port }}"
+        timeout: 30
+        delay: 5
+
+    - name: Verify Windows Exporter service is running
+      win_service:
+        name: windows_exporter
+      register: windows_exporter_service_check
+      ignore_errors: true
+
+    - name: Verify Windows Exporter service startup type (final check)
+      win_shell: |
+        $service = Get-WmiObject -Class Win32_Service -Filter "Name='windows_exporter'"
+        if ($service) {
+          Write-Output "{`"name`":`"$($service.Name)`",`"state`":`"$($service.State)`",`"start_mode`":`"$($service.StartMode)`",`"status`":`"$($service.Status)`"}"
+        } else {
+          Write-Output "{`"name`":`"windows_exporter`",`"state`":`"Not Found`",`"start_mode`":`"Unknown`",`"status`":`"Not Found`"}"
+        }
+      register: windows_exporter_final_check
+      changed_when: false
+      ignore_errors: true
+
+    - name: Verify Windows Exporter is listening on port
+      win_wait_for:
+        port: "{{ windows_exporter_port }}"
+        timeout: 30
+        delay: 5
+      register: windows_exporter_port_check
+      ignore_errors: true
+
+    - name: Get Windows hostname and IP address
+      win_shell: |
+        $hostname = $env:COMPUTERNAME
+        $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*"} | Select-Object -First 1).IPAddress
+        if (-not $ip) { $ip = "127.0.0.1" }
+        Write-Output "{`"hostname`":`"$hostname`",`"ip_address`":`"$ip`"}"
+      register: windows_node_info
+      changed_when: false
+
+    - name: Parse Windows node information
+      set_fact:
+        node_info:
+          hostname: "{{ (windows_node_info.stdout | from_json).hostname }}"
+          fqdn: "{{ (windows_node_info.stdout | from_json).hostname }}"
+          ip_address: "{{ (windows_node_info.stdout | from_json).ip_address }}"
+          port: "{{ windows_exporter_port }}"
+          os: "Windows"
+          instance_label: "{{ (windows_node_info.stdout | from_json).hostname }}-{{ (windows_node_info.stdout | from_json).ip_address }}"
+          scheme: "http"
+          job_name: "windows-exporter"
+
+    - name: Display Windows Exporter status
+      debug:
+        msg:
+          - "=========================================="
+          - "Windows Exporter Installation Summary"
+          - "=========================================="
+          - "Version: {{ windows_exporter_version }}"
+          - "Port: {{ windows_exporter_port }}"
+          - "Install Directory: {{ windows_exporter_install_dir }}"
+          - "Hostname: {{ node_info.hostname }}"
+          - "IP Address: {{ node_info.ip_address }}"
+          - "Service Status: {{ 'Running' if (windows_exporter_service_check.exists | default(false)) and (windows_exporter_service_check.state == 'running') else 'Not running - check manually' }}"
+          - "Service Start Mode: {{ (windows_exporter_final_check.stdout | from_json).start_mode | default('Unknown') if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
+          - "Auto-Start on Boot: {{ 'YES - Service will start automatically on reboot' if (windows_exporter_final_check.stdout | from_json).start_mode | default('') == 'Auto' else 'NO - Service may not start on reboot' if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
+          - "Port Status: {{ 'Listening' if windows_exporter_port_check is succeeded else 'Not listening - check manually' }}"
+          - "HTTP Endpoint: {{ 'Accessible' if (windows_exporter_http_check is defined and windows_exporter_http_check.status == 200) else 'Not accessible - check service and port' }}"
+          - "=========================================="
+          - "To verify service configuration manually:"
+          - "  Get-Service windows_exporter"
+          - "  Get-WmiObject -Class Win32_Service -Filter \"Name='windows_exporter'\" | Select-Object Name, State, StartMode"
+          - "=========================================="
+
+    - name: Create tmp directory on localhost
+      file:
+        path: "{{ playbook_dir }}/../tmp"
+        state: directory
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+    - name: Save Windows node information for Prometheus configuration
+      copy:
+        content: |
+          {
+            "hostname": "{{ node_info.hostname }}",
+            "fqdn": "{{ node_info.fqdn }}",
+            "ip_address": "{{ node_info.ip_address }}",
+            "port": "{{ node_info.port }}",
+            "os": "{{ node_info.os }}",
+            "instance_label": "{{ node_info.instance_label }}",
+            "scheme": "http",
+            "job_name": "windows-exporter"
+          }
+        dest: "{{ playbook_dir }}/../tmp/node_exporter_info.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: prometheus_auto_configure | default(false)
+
+    - name: Clean up installer
+      win_file:
+        path: "{{ windows_installer_path }}"
+        state: absent
+

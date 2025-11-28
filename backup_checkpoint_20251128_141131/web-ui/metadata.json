@@ -1,0 +1,5 @@
+{
+  "name": "InfraMonitor",
+  "description": "A monitoring dashboard that automates infrastructure setup. It checks for Podman, starts Prometheus, and generates playbooks for Node Exporter installation.",
+  "requestFramePermissions": []
+}
