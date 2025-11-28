@@ -133,7 +133,7 @@ export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
         <div className="bg-gradient-to-r from-slate-900/80 to-slate-800/60 px-6 py-4 border-t border-slate-700/50">
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500 font-mono">
-              <span className="text-slate-400">OpsMonitor AI</span> v1.0.0
+              <span className="text-slate-400">InfraMonitor</span> v1.0.0
             </p>
             <div className="flex gap-1">
               <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></div>

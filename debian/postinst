@@ -1,0 +1,126 @@
+#!/bin/bash
+# Post-installation script for InfraMonitor
+# Runs silently to hide installation details
+
+set -e
+
+APP_NAME="inframonitor"
+INSTALL_DIR="/opt/${APP_NAME}"
+SERVICE_NAME="${APP_NAME}.service"
+
+# Redirect all output to log file (hidden from user)
+LOG_FILE="/var/log/${APP_NAME}-install.log"
+exec > >(tee -a "${LOG_FILE}" > /dev/null 2>&1)
+exec 2>&1
+
+echo "[$(date)] Starting InfraMonitor installation..." >> "${LOG_FILE}"
+
+# Create application directory
+mkdir -p "${INSTALL_DIR}"
+
+# Copy package files to installation directory
+# Files are installed to /usr/share/inframonitor by dpkg
+# We copy them to /opt/inframonitor for runtime
+if [ -d "/usr/share/${APP_NAME}" ]; then
+    mkdir -p "${INSTALL_DIR}"
+    cp -r /usr/share/${APP_NAME}/* "${INSTALL_DIR}/" 2>/dev/null || true
+    # Ensure proper permissions
+    chown -R root:root "${INSTALL_DIR}" 2>/dev/null || true
+    chmod -R u+rwX,go+rX "${INSTALL_DIR}" 2>/dev/null || true
+fi
+
+# Create Python virtual environment silently
+echo "[$(date)] Creating Python virtual environment..." >> "${LOG_FILE}"
+python3 -m venv "${INSTALL_DIR}/.venv" >/dev/null 2>&1 || true
+source "${INSTALL_DIR}/.venv/bin/activate" 2>/dev/null || true
+
+# Upgrade pip silently
+"${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip --quiet --no-warn-script-location >/dev/null 2>&1 || true
+
+# Install Python dependencies silently
+if [ -f "${INSTALL_DIR}/requirements.txt" ]; then
+    echo "[$(date)] Installing Python dependencies..." >> "${LOG_FILE}"
+    "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt" --quiet --no-warn-script-location >/dev/null 2>&1 || true
+fi
+
+deactivate 2>/dev/null || true
+
+# Deploy Prometheus silently (suppress all Ansible output)
+if [ -f "${INSTALL_DIR}/playbooks/setup-prometheus-podman.yml" ]; then
+    echo "[$(date)] Deploying Prometheus..." >> "${LOG_FILE}"
+    (
+        cd "${INSTALL_DIR}"
+        source "${INSTALL_DIR}/.venv/bin/activate" 2>/dev/null
+        # Run Ansible silently - suppress all output
+        # Create temporary ansible.cfg to suppress all output
+        ANSIBLE_CFG="${INSTALL_DIR}/.ansible_install.cfg"
+        cat > "${ANSIBLE_CFG}" <<ANSIBLE_CFG_EOF
+[defaults]
+display_skipped_hosts = False
+display_ok_hosts = False
+stdout_callback = minimal
+stderr_callback = minimal
+ANSIBLE_CFG_EOF
+        
+        # Run with --quiet and minimal output
+        ANSIBLE_CONFIG="${ANSIBLE_CFG}" \
+        "${INSTALL_DIR}/.venv/bin/ansible-playbook" \
+            -i localhost, \
+            -c local \
+            playbooks/setup-prometheus-podman.yml \
+            -e "ansible_python_interpreter=${INSTALL_DIR}/.venv/bin/python" \
+            --quiet \
+            >/dev/null 2>&1 || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo "[$(date)] Prometheus deployment had issues (exit code: $EXIT_CODE)" >> "${LOG_FILE}"
+            fi
+        }
+        
+        # Clean up temp config
+        rm -f "${ANSIBLE_CFG}" 2>/dev/null || true
+        deactivate 2>/dev/null
+    )
+fi
+
+# Enable Prometheus container systemd service
+if systemctl list-unit-files 2>/dev/null | grep -q "container-prometheus.service"; then
+    systemctl enable --now container-prometheus.service >/dev/null 2>&1 || true
+fi
+
+# Create systemd service for the application
+echo "[$(date)] Creating systemd service..." >> "${LOG_FILE}"
+cat > "/etc/systemd/system/${SERVICE_NAME}" <<SERVICE_EOF
+[Unit]
+Description=InfraMonitor Monitoring Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${INSTALL_DIR}
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/web-ui/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+# Reload systemd and enable service
+systemctl daemon-reload >/dev/null 2>&1
+systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
+
+# Start service (but don't fail if it doesn't start immediately)
+systemctl start "${SERVICE_NAME}" >/dev/null 2>&1 || true
+
+echo "[$(date)] InfraMonitor installation completed successfully" >> "${LOG_FILE}"
+
+# Clean up log file if installation was successful (optional - comment out to keep logs)
+# rm -f "${LOG_FILE}"
+
+exit 0
+

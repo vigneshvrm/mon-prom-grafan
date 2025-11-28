@@ -1,5 +1,5 @@
 {
-  "name": "OpsMonitor AI",
-  "description": "A smart monitoring dashboard that automates infrastructure setup using Gemini AI. It simulates checking for Podman, starting Prometheus, and generating Ansible playbooks for Node Exporter installation.",
+  "name": "InfraMonitor",
+  "description": "A monitoring dashboard that automates infrastructure setup. It checks for Podman, starts Prometheus, and generates playbooks for Node Exporter installation.",
   "requestFramePermissions": []
 }

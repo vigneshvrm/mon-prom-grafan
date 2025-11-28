@@ -43,31 +43,61 @@ Access:
 
 ## Packaging for Distribution
 
-To build a self-contained release archive that clients can install with a single script:
+## Packaging for Distribution
 
-1. Run the packaging helper (requires `npm`, `python3`, `tar`):
+### Option 1: Debian Package (.deb) - Recommended
+
+Build a professional Debian package with silent installation (hides all installation details):
+
+1. Build the .deb package:
    ```bash
    cd Monitoring
-   bash scripts/package-release.sh
+   bash scripts/package-release.sh --deb
    ```
-   This produces `dist/opsmonitor-<timestamp>.tar.gz` containing the backend, compiled React UI, Ansible playbooks, helper scripts, and an `INSTALL.sh`.
+   This produces `dist/inframonitor_1.0.0_all.deb`
+
+2. On the client host (Debian/Ubuntu):
+   ```bash
+   sudo dpkg -i inframonitor_1.0.0_all.deb
+   # If dependencies are missing:
+   sudo apt-get install -f
+   ```
+
+**Benefits of .deb package:**
+- ✅ Silent installation - clients cannot see Ansible playbook execution
+- ✅ Professional package management
+- ✅ Automatic dependency resolution
+- ✅ Clean uninstall: `sudo apt-get remove inframonitor`
+- ✅ All installation logs hidden in `/var/log/inframonitor-install.log`
+
+### Option 2: Tarball with INSTALL.sh
+
+Build a self-contained tarball for manual installation:
+
+1. Run the packaging helper:
+   ```bash
+   cd Monitoring
+   bash scripts/package-release.sh --tar
+   ```
+   This produces `dist/inframonitor-<timestamp>.tar.gz`
 
 2. On the client host:
    ```bash
-   tar -xzf opsmonitor-<timestamp>.tar.gz
-   cd opsmonitor-<timestamp>
+   tar -xzf inframonitor-<timestamp>.tar.gz
+   cd inframonitor-<timestamp>
    sudo ./INSTALL.sh
    ```
-   The installer:
-   - Installs Python/podman prerequisites (apt/yum)
-   - Deploys the app into `/opt/opsmonitor`
-   - Creates a Python virtualenv and installs `requirements.txt`
-   - Runs the `playbooks/setup-prometheus-podman.yml` playbook locally (via Ansible) to pull the Prometheus image, start the Podman container, and generate/enable the `container-prometheus.service`
-   - Registers `opsmonitor.service` with systemd and starts it
+
+The installer:
+- Installs Python/podman prerequisites (apt/yum)
+- Deploys the app into `/opt/inframonitor`
+- Creates a Python virtualenv and installs `requirements.txt`
+- Runs the `playbooks/setup-prometheus-podman.yml` playbook locally
+- Registers `inframonitor.service` with systemd and starts it
 
 After installation, check the service with:
 ```bash
-sudo systemctl status opsmonitor.service
+sudo systemctl status inframonitor.service
 podman ps                           # should list the prometheus container
 ```
 

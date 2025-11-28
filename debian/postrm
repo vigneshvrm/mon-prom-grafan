@@ -1,0 +1,22 @@
+#!/bin/bash
+# Post-removal script for InfraMonitor
+
+set -e
+
+APP_NAME="inframonitor"
+SERVICE_NAME="${APP_NAME}.service"
+INSTALL_DIR="/opt/${APP_NAME}"
+
+# Remove systemd service file
+if [ -f "/etc/systemd/system/${SERVICE_NAME}" ]; then
+    rm -f "/etc/systemd/system/${SERVICE_NAME}"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+# Optionally remove installation directory (uncomment if desired)
+# if [ -d "${INSTALL_DIR}" ]; then
+#     rm -rf "${INSTALL_DIR}"
+# fi
+
+exit 0
+

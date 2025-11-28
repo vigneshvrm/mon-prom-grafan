@@ -1,23 +1,55 @@
 #!/usr/bin/env bash
 #
-# Build a self-contained OpsMonitor release archive.
+# Build InfraMonitor release package.
 #
-# The resulting tarball contains:
-#   - Backend (Flask) application
-#   - Compiled React frontend assets
-#   - Ansible playbooks and helper scripts
-#   - An INSTALL.sh script that sets up a Python virtual environment,
-#     installs dependencies, registers a systemd service, and starts it.
+# Options:
+#   --deb    Build as Debian package (.deb) - recommended for production
+#   --tar    Build as tarball with INSTALL.sh (default)
+#
+# Debian package (.deb):
+#   - Professional installation via dpkg
+#   - Silent installation (hides Ansible playbook execution)
+#   - Automatic dependency management
+#   - Clean uninstall support
+#
+# Tarball:
+#   - Self-contained archive with INSTALL.sh
+#   - Manual installation process
 #
 # Requirements:
 #   - bash, tar, python3, python3-venv, pip
 #   - npm (for building the frontend)
+#   - dpkg-deb, fakeroot (for .deb builds)
 
 set -euo pipefail
 
+# Check for build type argument
+BUILD_TYPE="tar"
+if [[ "${1:-}" == "--deb" ]]; then
+    BUILD_TYPE="deb"
+elif [[ "${1:-}" == "--tar" ]]; then
+    BUILD_TYPE="tar"
+elif [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+    echo "Usage: $0 [--deb|--tar]"
+    echo ""
+    echo "  --deb    Build as Debian package (.deb) - silent installation"
+    echo "  --tar    Build as tarball with INSTALL.sh (default)"
+    exit 0
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
-PKG_NAME="opsmonitor-$(date +%Y%m%d-%H%M%S)"
+
+# If building .deb, use the dedicated script
+if [[ "${BUILD_TYPE}" == "deb" ]]; then
+    echo "Building Debian package (.deb)..."
+    echo ""
+    "${ROOT_DIR}/scripts/build-deb.sh"
+    exit $?
+fi
+
+# Continue with tarball build
+PKG_NAME="inframonitor-$(date +%Y%m%d-%H%M%S)"
 PKG_DIR="${DIST_DIR}/${PKG_NAME}"
 
 echo "[1/6] Preparing dist directory..."
@@ -67,9 +99,9 @@ cat > "${PKG_DIR}/INSTALL.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="opsmonitor"
+APP_NAME="inframonitor"
 INSTALL_DIR="/opt/${APP_NAME}"
-SERVICE_NAME="opsmonitor.service"
+SERVICE_NAME="inframonitor.service"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Please run INSTALL.sh as root (sudo)." >&2
@@ -98,7 +130,7 @@ pip install --upgrade pip
 pip install -r "${INSTALL_DIR}/requirements.txt"
 deactivate
 
-echo "[*] Deploying Prometheus (Podman) via Ansible..."
+echo "[*] Deploying Prometheus (Podman)..."
 (
   cd "${INSTALL_DIR}"
   source "${INSTALL_DIR}/.venv/bin/activate"
@@ -114,7 +146,7 @@ fi
 echo "[*] Writing systemd service..."
 cat <<SERVICE >/etc/systemd/system/${SERVICE_NAME}
 [Unit]
-Description=OpsMonitor Monitoring Service
+Description=InfraMonitor Monitoring Service
 After=network-online.target
 
 [Service]
@@ -132,14 +164,14 @@ echo "[*] Reloading systemd and starting service..."
 systemctl daemon-reload
 systemctl enable --now "${SERVICE_NAME}"
 
-echo "[+] OpsMonitor installation completed."
+echo "[+] InfraMonitor installation completed."
 echo "    Service status: systemctl status ${SERVICE_NAME}"
 EOF
 chmod +x "${PKG_DIR}/INSTALL.sh"
 
 echo "[5/6] Generating manifest..."
 cat > "${PKG_DIR}/MANIFEST.txt" <<EOF
-OpsMonitor Release
+InfraMonitor Release
 ==================
 Package: ${PKG_NAME}
 Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")

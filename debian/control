@@ -1,0 +1,17 @@
+Package: inframonitor
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.8), python3-pip, python3-venv, podman, tar, curl
+Maintainer: Infrastructure Team <infra@example.com>
+Description: Infrastructure Monitoring System
+ A comprehensive monitoring solution for infrastructure management
+ with automated agent deployment and Prometheus integration.
+ .
+ Features:
+  - Automated Node Exporter installation
+  - Prometheus container management
+  - Web-based monitoring dashboard
+  - Real-time server health monitoring
+

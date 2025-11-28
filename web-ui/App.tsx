@@ -298,8 +298,8 @@ const App: React.FC = () => {
                 <Activity className="w-6 h-6 text-white" />
               </div>
               <div>
-                <span className="text-xl font-bold tracking-tight text-slate-100 block">OpsMonitor</span>
-                <span className="text-xs text-slate-500 font-medium">AI Infrastructure</span>
+                <span className="text-xl font-bold tracking-tight text-slate-100 block">InfraMonitor</span>
+                <span className="text-xs text-slate-500 font-medium">Infrastructure</span>
               </div>
             </div>
           </div>

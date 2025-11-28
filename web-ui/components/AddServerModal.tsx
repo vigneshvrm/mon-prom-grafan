@@ -237,7 +237,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
                 <p className="text-sm text-blue-200 flex items-start gap-2">
                     <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" />
                     <span>
-                        <strong className="font-semibold">Security Note:</strong> Ansible will use these credentials to securely install and configure the Node Exporter agent on the target server.
+                        <strong className="font-semibold">Security Note:</strong> These credentials will be used to securely install and configure the Node Exporter agent on the target server.
                     </span>
                 </p>
             </div>
@@ -263,7 +263,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
             {isDeploying ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Running Ansible Playbook...</span>
+                <span>Installing Agent...</span>
               </>
             ) : (
               <>
