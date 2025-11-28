@@ -94,6 +94,14 @@ if [ -f "${ROOT_DIR}/config.yml.example" ]; then
     cp "${ROOT_DIR}/config.yml.example" "${DEB_DIR}/${DEB_NAME}/usr/share/${PKG_NAME}/"
 fi
 
+# Documentation files
+if [ -f "${ROOT_DIR}/USER-GUIDE.md" ]; then
+    cp "${ROOT_DIR}/USER-GUIDE.md" "${DEB_DIR}/${DEB_NAME}/usr/share/${PKG_NAME}/"
+fi
+if [ -f "${ROOT_DIR}/QUICK-START.md" ]; then
+    cp "${ROOT_DIR}/QUICK-START.md" "${DEB_DIR}/${DEB_NAME}/usr/share/${PKG_NAME}/"
+fi
+
 # Copy Debian control files
 echo "[5/7] Setting up Debian package files..."
 cp "${ROOT_DIR}/debian/control" "${DEB_DIR}/${DEB_NAME}/DEBIAN/control"
@@ -138,10 +146,12 @@ echo "✓ Debian package built successfully!"
 echo ""
 echo "Package: ${DIST_DIR}/${DEB_NAME}.deb"
 echo ""
-echo "To install:"
+echo "Installation:"
 echo "  sudo dpkg -i ${DIST_DIR}/${DEB_NAME}.deb"
+echo "  sudo apt-get install -f  # If dependencies needed"
 echo ""
-echo "To install with dependency resolution:"
-echo "  sudo apt-get install -f && sudo dpkg -i ${DIST_DIR}/${DEB_NAME}.deb"
+echo "Documentation:"
+echo "  📖 See USER-GUIDE.md for complete step-by-step instructions"
+echo "  ⚡ See QUICK-START.md for 5-minute quick start"
 echo ""
 

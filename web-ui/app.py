@@ -541,10 +541,10 @@ operation_timeout_sec = 10
                             app.logger.warning(f"Node info file too large: {path} ({file_size} bytes)")
                             break
                         
-                        with open(path, 'r') as f:
-                            node_info = json.load(f)
+                    with open(path, 'r') as f:
+                        node_info = json.load(f)
                         node_info_path = path  # Store path for cleanup
-                        break
+                    break
                     except (json.JSONDecodeError, IOError) as e:
                         app.logger.warning(f"Error reading node info file {path}: {e}")
                         continue
@@ -661,7 +661,7 @@ operation_timeout_sec = 10
                 # Overwrite with zeros before deletion (if possible)
                 with open(extra_vars_file, 'wb') as f:
                     f.write(b'\x00' * os.path.getsize(extra_vars_file))
-                os.unlink(extra_vars_file)
+            os.unlink(extra_vars_file)
             except:
                 os.unlink(extra_vars_file)
         
@@ -670,7 +670,7 @@ operation_timeout_sec = 10
                 # Overwrite with zeros before deletion (if possible)
                 with open(dynamic_inventory, 'wb') as f:
                     f.write(b'\x00' * os.path.getsize(dynamic_inventory))
-                os.unlink(dynamic_inventory)
+            os.unlink(dynamic_inventory)
             except:
                 os.unlink(dynamic_inventory)
         
@@ -732,7 +732,7 @@ def serve_react_app(path):
                 abs_file = os.path.abspath(file_path)
                 if abs_file.startswith(abs_static):
                     # Flask's send_from_directory is secure - use it directly
-                    return send_from_directory(static_dir, path)
+        return send_from_directory(static_dir, path)
         except Exception as e:
             app.logger.debug(f"Could not serve static file {path}: {e}")
             # Fall through to serve index.html for SPA routing
@@ -849,10 +849,10 @@ def validate():
     try:
         data = request.json
         if not data:
-            return jsonify({
-                'valid': False,
+                return jsonify({
+                    'valid': False,
                 'error': 'Invalid request: JSON data required'
-            }), 400
+                }), 400
         
         # SECURITY: Use security utilities for validation
         is_valid, error_msg = validate_install_request(data)

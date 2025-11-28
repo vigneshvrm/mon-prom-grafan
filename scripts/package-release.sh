@@ -128,7 +128,17 @@ cp -r "${ROOT_DIR}/scripts" "${PKG_DIR}/"
 # Root level files
 cp "${ROOT_DIR}/requirements.txt" "${PKG_DIR}/"
 cp "${ROOT_DIR}/start-application.sh" "${PKG_DIR}/"
-cp "${ROOT_DIR}/config.yml.example" "${PKG_DIR}/"
+if [ -f "${ROOT_DIR}/config.yml.example" ]; then
+    cp "${ROOT_DIR}/config.yml.example" "${PKG_DIR}/"
+fi
+
+# Documentation files
+if [ -f "${ROOT_DIR}/USER-GUIDE.md" ]; then
+    cp "${ROOT_DIR}/USER-GUIDE.md" "${PKG_DIR}/"
+fi
+if [ -f "${ROOT_DIR}/QUICK-START.md" ]; then
+    cp "${ROOT_DIR}/QUICK-START.md" "${PKG_DIR}/"
+fi
 
 echo "[4/6] Creating installation script..."
 cat > "${PKG_DIR}/INSTALL.sh" <<'EOF'
@@ -220,6 +230,20 @@ Contents:
   - INSTALL.sh        Installer script
   - requirements.txt
   - start-application.sh
+  - USER-GUIDE.md     Complete user documentation
+  - QUICK-START.md    Quick start guide
+
+Documentation:
+  📖 USER-GUIDE.md    - Complete step-by-step instructions
+  ⚡ QUICK-START.md   - 5-minute quick start guide
+
+Installation:
+  tar -xzf ${PKG_NAME}.tar.gz
+  cd ${PKG_NAME}
+  sudo ./INSTALL.sh
+
+Access:
+  http://your-server-ip:5000
 EOF
 
 echo "[6/6] Creating tarball..."
@@ -244,9 +268,13 @@ echo "✓ Tarball package created successfully!"
 echo ""
 echo "Package: ${DIST_DIR}/${PKG_NAME}.tar.gz"
 echo ""
-echo "To install:"
+echo "Installation:"
 echo "  tar -xzf ${PKG_NAME}.tar.gz"
 echo "  cd ${PKG_NAME}"
 echo "  sudo ./INSTALL.sh"
+echo ""
+echo "Documentation:"
+echo "  See USER-GUIDE.md for complete instructions"
+echo "  See QUICK-START.md for quick setup"
 echo ""
 

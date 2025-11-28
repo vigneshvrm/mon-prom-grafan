@@ -41,7 +41,18 @@ Access:
 - **Web UI**: http://localhost:5000 (Modern React UI)
 - **Prometheus UI**: http://localhost:9090
 
-## Packaging for Distribution
+## User Documentation
+
+**📖 [USER-GUIDE.md](USER-GUIDE.md)** - Complete step-by-step user guide:
+- Installation instructions (both .deb and tarball)
+- Adding Linux servers
+- Adding Windows servers (with WinRM setup)
+- Troubleshooting guide
+- Verification steps
+
+**⚡ [QUICK-START.md](QUICK-START.md)** - 5-minute quick start guide
+
+---
 
 ## Packaging for Distribution
 
