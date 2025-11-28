@@ -33,9 +33,25 @@ mkdir -p "${DEB_DIR}/${DEB_NAME}"
 echo "[2/7] Building React frontend..."
 pushd "${ROOT_DIR}/web-ui" >/dev/null
 if [ ! -d "node_modules" ]; then
-    npm install --silent >/dev/null 2>&1
+    echo "  Installing npm dependencies..."
+    npm install >/dev/null 2>&1 || {
+        echo "ERROR: npm install failed" >&2
+        popd >/dev/null
+        exit 1
+    }
 fi
-npm run build >/dev/null 2>&1
+echo "  Running npm build..."
+npm run build || {
+    echo "ERROR: npm run build failed" >&2
+    echo "Please check the errors above and fix them before building the package." >&2
+    popd >/dev/null
+    exit 1
+}
+if [ ! -d "dist" ]; then
+    echo "ERROR: web-ui/dist directory not found after build" >&2
+    popd >/dev/null
+    exit 1
+fi
 popd >/dev/null
 
 # Create package directory structure

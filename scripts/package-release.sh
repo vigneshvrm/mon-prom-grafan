@@ -25,11 +25,11 @@ set -euo pipefail
 
 # Check for build type argument
 BUILD_TYPE="tar"
-if [[ "${1:-}" == "--deb" ]]; then
+if [ "${1:-}" = "--deb" ]; then
     BUILD_TYPE="deb"
-elif [[ "${1:-}" == "--tar" ]]; then
+elif [ "${1:-}" = "--tar" ]; then
     BUILD_TYPE="tar"
-elif [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+elif [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     echo "Usage: $0 [--deb|--tar]"
     echo ""
     echo "  --deb    Build as Debian package (.deb) - silent installation"
@@ -41,10 +41,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 
 # If building .deb, use the dedicated script
-if [[ "${BUILD_TYPE}" == "deb" ]]; then
+if [ "${BUILD_TYPE}" = "deb" ]; then
     echo "Building Debian package (.deb)..."
     echo ""
-    "${ROOT_DIR}/scripts/build-deb.sh"
+    BUILD_DEB_SCRIPT="${ROOT_DIR}/scripts/build-deb.sh"
+    if [ ! -f "${BUILD_DEB_SCRIPT}" ]; then
+        echo "ERROR: build-deb.sh not found at ${BUILD_DEB_SCRIPT}" >&2
+        exit 1
+    fi
+    if [ ! -x "${BUILD_DEB_SCRIPT}" ]; then
+        chmod +x "${BUILD_DEB_SCRIPT}"
+    fi
+    bash "${BUILD_DEB_SCRIPT}"
     exit $?
 fi
 
