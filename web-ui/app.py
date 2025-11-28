@@ -1212,61 +1212,76 @@ def check_server_health(server):
     }
     
     # Check 1: Basic port connectivity (SSH for Linux, WinRM for Windows)
+    # For Windows, try both 5985 (HTTP) and 5986 (HTTPS) if configured port fails
     port_online = False
-    try:
-        app.logger.info(f"Health check [{server_name}]: Checking port {server_ip}:{server_port}")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)  # 5 second timeout
-        result = sock.connect_ex((server_ip, server_port))
-        sock.close()
-        port_online = (result == 0)
-        details['port_check'] = 'SUCCESS' if port_online else 'FAILED'
-        details['port_open'] = port_online
-        if port_online:
-            app.logger.info(f"Health check [{server_name}]: Port {server_port} is OPEN")
-        else:
-            app.logger.warning(f"Health check [{server_name}]: Port {server_port} is CLOSED (connection result: {result})")
-            details['errors'].append(f"Port {server_port} is not accessible")
-    except Exception as e:
-        app.logger.error(f"Health check [{server_name}]: Port connectivity check failed: {e}")
-        details['port_check'] = 'ERROR'
-        details['errors'].append(f"Port check exception: {str(e)}")
-        port_online = False
+    ports_to_check = [server_port]
     
-    # Check 2: Node Exporter availability (if port is open, try to connect to metrics endpoint)
-    node_exporter_online = False
-    if port_online:
+    # For Windows servers, if configured port fails, try alternative WinRM ports
+    if server_os == 'windows':
+        if server_port == 5986:
+            ports_to_check = [5986, 5985]  # Try HTTPS first, then HTTP
+        elif server_port == 5985:
+            ports_to_check = [5985, 5986]  # Try HTTP first, then HTTPS
+        else:
+            ports_to_check = [server_port, 5985, 5986]  # Try configured, then both WinRM ports
+    
+    for check_port in ports_to_check:
         try:
-            app.logger.info(f"Health check [{server_name}]: Checking Node Exporter on {server_ip}:{node_exporter_port}")
-            # Try to connect to Node Exporter metrics endpoint
-            metrics_url = f"http://{server_ip}:{node_exporter_port}/metrics"
-            response = requests.get(metrics_url, timeout=5)
-            if response.status_code == 200:
-                node_exporter_online = True
-                details['node_exporter_check'] = 'SUCCESS'
-                details['node_exporter_online'] = True
-                app.logger.info(f"Health check [{server_name}]: Node Exporter is ONLINE (status: {response.status_code})")
+            app.logger.info(f"Health check [{server_name}]: Checking port {server_ip}:{check_port}")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)  # 5 second timeout
+            result = sock.connect_ex((server_ip, check_port))
+            sock.close()
+            if result == 0:
+                port_online = True
+                details['port_check'] = 'SUCCESS'
+                details['port_open'] = True
+                details['accessible_port'] = check_port
+                app.logger.info(f"Health check [{server_name}]: Port {check_port} is OPEN")
+                break
             else:
-                details['node_exporter_check'] = f'FAILED (HTTP {response.status_code})'
-                details['errors'].append(f"Node Exporter returned HTTP {response.status_code}")
-                app.logger.warning(f"Health check [{server_name}]: Node Exporter returned HTTP {response.status_code}")
-        except requests.exceptions.ConnectionError as e:
-            details['node_exporter_check'] = 'CONNECTION_ERROR'
-            details['errors'].append(f"Node Exporter connection refused: {str(e)}")
-            app.logger.warning(f"Health check [{server_name}]: Node Exporter connection refused on port {node_exporter_port}")
-        except requests.exceptions.Timeout as e:
-            details['node_exporter_check'] = 'TIMEOUT'
-            details['errors'].append(f"Node Exporter request timeout: {str(e)}")
-            app.logger.warning(f"Health check [{server_name}]: Node Exporter request timeout")
+                app.logger.debug(f"Health check [{server_name}]: Port {check_port} is CLOSED (connection result: {result})")
         except Exception as e:
-            details['node_exporter_check'] = f'ERROR: {str(e)}'
-            details['errors'].append(f"Node Exporter check exception: {str(e)}")
-            app.logger.error(f"Health check [{server_name}]: Node Exporter check failed: {e}")
-            node_exporter_online = False
-    else:
-        details['node_exporter_check'] = 'SKIPPED (port not open)'
-        details['errors'].append(f"Cannot check Node Exporter - port {server_port} is not accessible")
-        app.logger.warning(f"Health check [{server_name}]: Skipping Node Exporter check - port {server_port} is closed")
+            app.logger.debug(f"Health check [{server_name}]: Port {check_port} check failed: {e}")
+            continue
+    
+    if not port_online:
+        details['port_check'] = 'FAILED'
+        details['port_open'] = False
+        checked_ports = ', '.join(map(str, ports_to_check))
+        details['errors'].append(f"Management ports ({checked_ports}) are not accessible")
+        app.logger.warning(f"Health check [{server_name}]: All management ports ({checked_ports}) are CLOSED")
+    
+    # Check 2: Node Exporter availability (ALWAYS check, independent of WinRM/SSH port)
+    # Node Exporter runs on port 9100 and is independent of management port
+    node_exporter_online = False
+    try:
+        app.logger.info(f"Health check [{server_name}]: Checking Node Exporter on {server_ip}:{node_exporter_port}")
+        # Try to connect to Node Exporter metrics endpoint
+        metrics_url = f"http://{server_ip}:{node_exporter_port}/metrics"
+        response = requests.get(metrics_url, timeout=5)
+        if response.status_code == 200:
+            node_exporter_online = True
+            details['node_exporter_check'] = 'SUCCESS'
+            details['node_exporter_online'] = True
+            app.logger.info(f"Health check [{server_name}]: Node Exporter is ONLINE (status: {response.status_code})")
+        else:
+            details['node_exporter_check'] = f'FAILED (HTTP {response.status_code})'
+            details['errors'].append(f"Node Exporter returned HTTP {response.status_code} - service may not be installed or running")
+            app.logger.warning(f"Health check [{server_name}]: Node Exporter returned HTTP {response.status_code}")
+    except requests.exceptions.ConnectionError as e:
+        details['node_exporter_check'] = 'CONNECTION_ERROR'
+        details['errors'].append(f"Node Exporter connection refused on port {node_exporter_port} - service may not be installed or running")
+        app.logger.warning(f"Health check [{server_name}]: Node Exporter connection refused on port {node_exporter_port}")
+    except requests.exceptions.Timeout as e:
+        details['node_exporter_check'] = 'TIMEOUT'
+        details['errors'].append(f"Node Exporter request timeout: {str(e)}")
+        app.logger.warning(f"Health check [{server_name}]: Node Exporter request timeout")
+    except Exception as e:
+        details['node_exporter_check'] = f'ERROR: {str(e)}'
+        details['errors'].append(f"Node Exporter check exception: {str(e)}")
+        app.logger.error(f"Health check [{server_name}]: Node Exporter check failed: {e}")
+        node_exporter_online = False
     
     # Determine status
     if node_exporter_online:

@@ -49,8 +49,18 @@
       win_package:
         path: "{{ windows_installer_path }}"
         state: present
-        arguments: '/quiet ENABLE_LISTENER="y" LISTEN_PORT={{ windows_exporter_port }}'
+        arguments: '/quiet ENABLE_LISTENER=y LISTEN_PORT={{ windows_exporter_port }}'
         product_id: 'windows_exporter'
+      register: windows_exporter_install
+      failed_when: false
+      
+    - name: Check if MSI installation succeeded
+      assert:
+        that:
+          - windows_exporter_install.rc == 0 or windows_exporter_install.rc == 3010
+        fail_msg: "Windows Exporter MSI installation failed. Return code: {{ windows_exporter_install.rc | default('Unknown') }}"
+        success_msg: "Windows Exporter MSI installed successfully"
+      when: windows_exporter_install.rc is defined
 
 
     - name: Configure Windows Exporter service to start automatically
@@ -58,6 +68,13 @@
         name: windows_exporter
         start_mode: auto
         state: started
+      register: windows_exporter_start
+      failed_when: false
+      
+    - name: Wait for service to be ready
+      pause:
+        seconds: 5
+      when: windows_exporter_start.changed | default(false)
 
     - name: Verify Windows Exporter service startup configuration
       win_service:
@@ -75,7 +92,23 @@
           - "  Service Exists: {{ windows_exporter_service_config.exists | default(false) }}"
           - "  Auto-Start on Boot: {{ 'YES' if windows_exporter_service_config.start_mode | default('') == 'auto' else 'NO - Service may not start on reboot' }}"
 
-    - name: Open port in Windows Firewall
+    - name: Check if firewall rule already exists
+      win_shell: |
+        $rule = Get-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+        if ($rule) {
+          Write-Output "EXISTS"
+        } else {
+          Write-Output "NOT_EXISTS"
+        }
+      register: firewall_rule_check
+      changed_when: false
+      
+    - name: Remove existing firewall rule if it exists
+      win_shell: |
+        Remove-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+      when: firewall_rule_check.stdout == "EXISTS"
+      
+    - name: Open port in Windows Firewall (allow external access)
       win_firewall_rule:
         name: "Windows Exporter {{ windows_exporter_port }}"
         localport: "{{ windows_exporter_port }}"
@@ -84,6 +117,30 @@
         protocol: tcp
         state: present
         enabled: yes
+        profiles: ['domain', 'private', 'public']
+      register: firewall_rule_result
+      
+    - name: Verify firewall rule was created and enabled
+      win_shell: |
+        $rule = Get-NetFirewallRule -DisplayName "Windows Exporter {{ windows_exporter_port }}" -ErrorAction SilentlyContinue
+        if ($rule) {
+          $enabled = ($rule | Where-Object { $_.Enabled -eq $true })
+          if ($enabled) {
+            Write-Output "ENABLED"
+          } else {
+            Write-Output "DISABLED"
+          }
+        } else {
+          Write-Output "NOT_FOUND"
+        }
+      register: firewall_rule_status
+      changed_when: false
+      
+    - name: Display firewall rule status
+      debug:
+        msg:
+          - "Firewall Rule Status: {{ firewall_rule_status.stdout }}"
+          - "If DISABLED or NOT_FOUND, port {{ windows_exporter_port }} may be blocked from external access"
 
     - name: Wait for Windows Exporter to start
       win_wait_for:
@@ -153,6 +210,7 @@
           - "Service Start Mode: {{ (windows_exporter_final_check.stdout | from_json).start_mode | default('Unknown') if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
           - "Auto-Start on Boot: {{ 'YES - Service will start automatically on reboot' if (windows_exporter_final_check.stdout | from_json).start_mode | default('') == 'Auto' else 'NO - Service may not start on reboot' if windows_exporter_final_check.stdout is defined else 'Unknown' }}"
           - "Port Status: {{ 'Listening' if windows_exporter_port_check is succeeded else 'Not listening - check manually' }}"
+          - "HTTP Endpoint: {{ 'Accessible' if (windows_exporter_http_check is defined and windows_exporter_http_check.status == 200) else 'Not accessible - check service and port' }}"
           - "=========================================="
           - "To verify service configuration manually:"
           - "  Get-Service windows_exporter"
