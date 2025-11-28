@@ -88,12 +88,12 @@ Build a self-contained tarball for manual installation:
    sudo ./INSTALL.sh
    ```
 
-The installer:
-- Installs Python/podman prerequisites (apt/yum)
-- Deploys the app into `/opt/inframonitor`
-- Creates a Python virtualenv and installs `requirements.txt`
-- Runs the `playbooks/setup-prometheus-podman.yml` playbook locally
-- Registers `inframonitor.service` with systemd and starts it
+   The installer:
+   - Installs Python/podman/sshpass prerequisites (apt/yum)
+   - Deploys the app into `/opt/inframonitor`
+   - Creates a Python virtualenv and installs `requirements.txt`
+   - Runs the `playbooks/setup-prometheus-podman.yml` playbook locally
+   - Registers `inframonitor.service` with systemd and starts it
 
 After installation, check the service with:
 ```bash

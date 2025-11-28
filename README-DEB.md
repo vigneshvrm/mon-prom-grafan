@@ -26,12 +26,15 @@ sudo apt-get install -f
 ### What Happens During Installation
 
 The installation process is **completely silent** - clients will not see:
+- System package installation (python3, sshpass, podman, etc.)
 - Ansible playbook execution
 - Python dependency installation
 - Prometheus container deployment
 - System configuration details
 
 All installation logs are written to `/var/log/inframonitor-install.log` (accessible only to root).
+
+**Note:** The package automatically installs required dependencies including `sshpass` (needed for SSH password authentication with Ansible).
 
 ### Post-Installation
 

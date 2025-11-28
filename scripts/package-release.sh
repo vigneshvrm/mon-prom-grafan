@@ -147,11 +147,11 @@ fi
 echo "[*] Installing required system packages..."
 if command -v apt-get >/dev/null; then
   apt-get update
-  apt-get install -y python3 python3-venv python3-pip podman tar
+  apt-get install -y python3 python3-venv python3-pip podman tar sshpass curl
 elif command -v yum >/dev/null; then
-  yum install -y python3 python3-virtualenv python3-pip podman tar
+  yum install -y python3 python3-virtualenv python3-pip podman tar sshpass curl
 else
-  echo "Unsupported package manager. Install Python 3, pip, and Podman manually." >&2
+  echo "Unsupported package manager. Install Python 3, pip, Podman, sshpass, and curl manually." >&2
 fi
 
 echo "[*] Creating application directory at ${INSTALL_DIR}..."

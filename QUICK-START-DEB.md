@@ -49,7 +49,7 @@ sudo apt-get update
 sudo apt-get install -y dpkg-dev fakeroot
 
 # Build dependencies
-sudo apt-get install -y python3 python3-pip python3-venv podman tar curl
+sudo apt-get install -y python3 python3-pip python3-venv podman tar curl sshpass
 
 # Node.js for frontend build
 sudo apt-get install -y npm
