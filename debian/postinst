@@ -2,56 +2,94 @@
 # Post-installation script for InfraMonitor
 # Runs silently to hide installation details
 
-set -e
+# Don't use set -e, handle errors manually
+set +e
 
 APP_NAME="inframonitor"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="${APP_NAME}.service"
 
+# Create log directory if it doesn't exist
+mkdir -p /var/log
+
 # Redirect all output to log file (hidden from user)
 LOG_FILE="/var/log/${APP_NAME}-install.log"
-exec > >(tee -a "${LOG_FILE}" > /dev/null 2>&1)
-exec 2>&1
+touch "${LOG_FILE}"
+chmod 600 "${LOG_FILE}"
 
-echo "[$(date)] Starting InfraMonitor installation..." >> "${LOG_FILE}"
+# Function to log messages
+log_msg() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "${LOG_FILE}" 2>&1
+}
+
+log_msg "Starting InfraMonitor installation..."
 
 # Create application directory
-mkdir -p "${INSTALL_DIR}"
+log_msg "Creating application directory..."
+mkdir -p "${INSTALL_DIR}" || {
+    log_msg "ERROR: Failed to create ${INSTALL_DIR}"
+    exit 1
+}
 
 # Copy package files to installation directory
 # Files are installed to /usr/share/inframonitor by dpkg
 # We copy them to /opt/inframonitor for runtime
+log_msg "Copying application files..."
 if [ -d "/usr/share/${APP_NAME}" ]; then
-    mkdir -p "${INSTALL_DIR}"
-    cp -r /usr/share/${APP_NAME}/* "${INSTALL_DIR}/" 2>/dev/null || true
+    cp -r /usr/share/${APP_NAME}/* "${INSTALL_DIR}/" 2>>"${LOG_FILE}" || {
+        log_msg "ERROR: Failed to copy files from /usr/share/${APP_NAME}"
+        exit 1
+    }
     # Ensure proper permissions
-    chown -R root:root "${INSTALL_DIR}" 2>/dev/null || true
-    chmod -R u+rwX,go+rX "${INSTALL_DIR}" 2>/dev/null || true
+    chown -R root:root "${INSTALL_DIR}" 2>>"${LOG_FILE}" || true
+    chmod -R u+rwX,go+rX "${INSTALL_DIR}" 2>>"${LOG_FILE}" || true
+    log_msg "Files copied successfully"
+else
+    log_msg "ERROR: /usr/share/${APP_NAME} directory not found"
+    exit 1
 fi
 
 # Create Python virtual environment silently
-echo "[$(date)] Creating Python virtual environment..." >> "${LOG_FILE}"
-python3 -m venv "${INSTALL_DIR}/.venv" >/dev/null 2>&1 || true
-source "${INSTALL_DIR}/.venv/bin/activate" 2>/dev/null || true
+log_msg "Creating Python virtual environment..."
+python3 -m venv "${INSTALL_DIR}/.venv" >>"${LOG_FILE}" 2>&1 || {
+    log_msg "ERROR: Failed to create virtual environment"
+    exit 1
+}
+
+# Activate virtual environment
+source "${INSTALL_DIR}/.venv/bin/activate" >>"${LOG_FILE}" 2>&1 || {
+    log_msg "ERROR: Failed to activate virtual environment"
+    exit 1
+}
 
 # Upgrade pip silently
-"${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip --quiet --no-warn-script-location >/dev/null 2>&1 || true
+log_msg "Upgrading pip..."
+"${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip --quiet --no-warn-script-location >>"${LOG_FILE}" 2>&1 || {
+    log_msg "WARNING: pip upgrade failed, continuing..."
+}
 
 # Install Python dependencies silently
 if [ -f "${INSTALL_DIR}/requirements.txt" ]; then
-    echo "[$(date)] Installing Python dependencies..." >> "${LOG_FILE}"
-    "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt" --quiet --no-warn-script-location >/dev/null 2>&1 || true
+    log_msg "Installing Python dependencies..."
+    "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt" --quiet --no-warn-script-location >>"${LOG_FILE}" 2>&1 || {
+        log_msg "ERROR: Failed to install Python dependencies"
+        deactivate 2>/dev/null || true
+        exit 1
+    }
+    log_msg "Python dependencies installed successfully"
+else
+    log_msg "WARNING: requirements.txt not found"
 fi
 
 deactivate 2>/dev/null || true
 
 # Deploy Prometheus silently (suppress all Ansible output)
 if [ -f "${INSTALL_DIR}/playbooks/setup-prometheus-podman.yml" ]; then
-    echo "[$(date)] Deploying Prometheus..." >> "${LOG_FILE}"
+    log_msg "Deploying Prometheus..."
     (
-        cd "${INSTALL_DIR}"
-        source "${INSTALL_DIR}/.venv/bin/activate" 2>/dev/null
-        # Run Ansible silently - suppress all output
+        cd "${INSTALL_DIR}" || exit 1
+        source "${INSTALL_DIR}/.venv/bin/activate" >>"${LOG_FILE}" 2>&1 || exit 1
+        
         # Create temporary ansible.cfg to suppress all output
         ANSIBLE_CFG="${INSTALL_DIR}/.ansible_install.cfg"
         cat > "${ANSIBLE_CFG}" <<ANSIBLE_CFG_EOF
@@ -63,6 +101,7 @@ stderr_callback = minimal
 ANSIBLE_CFG_EOF
         
         # Run with --quiet and minimal output
+        log_msg "Running Ansible playbook for Prometheus..."
         ANSIBLE_CONFIG="${ANSIBLE_CFG}" \
         "${INSTALL_DIR}/.venv/bin/ansible-playbook" \
             -i localhost, \
@@ -70,26 +109,36 @@ ANSIBLE_CFG_EOF
             playbooks/setup-prometheus-podman.yml \
             -e "ansible_python_interpreter=${INSTALL_DIR}/.venv/bin/python" \
             --quiet \
-            >/dev/null 2>&1 || {
-            EXIT_CODE=$?
-            if [ $EXIT_CODE -ne 0 ]; then
-                echo "[$(date)] Prometheus deployment had issues (exit code: $EXIT_CODE)" >> "${LOG_FILE}"
-            fi
-        }
+            >>"${LOG_FILE}" 2>&1
+        
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            log_msg "ERROR: Prometheus deployment failed (exit code: $EXIT_CODE)"
+        else
+            log_msg "Prometheus deployment completed successfully"
+        fi
         
         # Clean up temp config
         rm -f "${ANSIBLE_CFG}" 2>/dev/null || true
-        deactivate 2>/dev/null
+        deactivate 2>/dev/null || true
     )
+else
+    log_msg "WARNING: Prometheus playbook not found at ${INSTALL_DIR}/playbooks/setup-prometheus-podman.yml"
 fi
 
 # Enable Prometheus container systemd service
+log_msg "Checking for Prometheus container service..."
 if systemctl list-unit-files 2>/dev/null | grep -q "container-prometheus.service"; then
-    systemctl enable --now container-prometheus.service >/dev/null 2>&1 || true
+    log_msg "Enabling Prometheus container service..."
+    systemctl enable --now container-prometheus.service >>"${LOG_FILE}" 2>&1 || {
+        log_msg "WARNING: Failed to enable container-prometheus.service"
+    }
+else
+    log_msg "WARNING: container-prometheus.service not found"
 fi
 
 # Create systemd service for the application
-echo "[$(date)] Creating systemd service..." >> "${LOG_FILE}"
+log_msg "Creating systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}" <<SERVICE_EOF
 [Unit]
 Description=InfraMonitor Monitoring Service
@@ -110,17 +159,42 @@ StandardError=journal
 WantedBy=multi-user.target
 SERVICE_EOF
 
+if [ ! -f "/etc/systemd/system/${SERVICE_NAME}" ]; then
+    log_msg "ERROR: Failed to create systemd service file"
+    exit 1
+fi
+
 # Reload systemd and enable service
-systemctl daemon-reload >/dev/null 2>&1
-systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
+log_msg "Reloading systemd and enabling service..."
+systemctl daemon-reload >>"${LOG_FILE}" 2>&1 || {
+    log_msg "ERROR: Failed to reload systemd"
+    exit 1
+}
 
-# Start service (but don't fail if it doesn't start immediately)
-systemctl start "${SERVICE_NAME}" >/dev/null 2>&1 || true
+systemctl enable "${SERVICE_NAME}" >>"${LOG_FILE}" 2>&1 || {
+    log_msg "ERROR: Failed to enable ${SERVICE_NAME}"
+    exit 1
+}
 
-echo "[$(date)] InfraMonitor installation completed successfully" >> "${LOG_FILE}"
+# Start service
+log_msg "Starting ${SERVICE_NAME}..."
+systemctl start "${SERVICE_NAME}" >>"${LOG_FILE}" 2>&1 || {
+    log_msg "ERROR: Failed to start ${SERVICE_NAME}"
+    log_msg "Check service status with: systemctl status ${SERVICE_NAME}"
+    exit 1
+}
 
-# Clean up log file if installation was successful (optional - comment out to keep logs)
-# rm -f "${LOG_FILE}"
+# Verify service is running
+sleep 2
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    log_msg "Service ${SERVICE_NAME} is running"
+else
+    log_msg "WARNING: Service ${SERVICE_NAME} may not be running"
+    log_msg "Check with: systemctl status ${SERVICE_NAME}"
+fi
+
+log_msg "InfraMonitor installation completed successfully"
+log_msg "Installation log available at: ${LOG_FILE}"
 
 exit 0
 

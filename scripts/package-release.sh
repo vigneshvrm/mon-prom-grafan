@@ -24,16 +24,22 @@
 set -euo pipefail
 
 # Check for build type argument
-BUILD_TYPE="tar"
+BUILD_TYPE="tar"  # Default to tarball
 if [ "${1:-}" = "--deb" ]; then
     BUILD_TYPE="deb"
 elif [ "${1:-}" = "--tar" ]; then
     BUILD_TYPE="tar"
+elif [ -n "${1:-}" ] && [ "${1:-}" != "--help" ] && [ "${1:-}" != "-h" ]; then
+    echo "ERROR: Unknown option: ${1}" >&2
+    echo "Usage: $0 [--deb|--tar]" >&2
+    exit 1
 elif [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     echo "Usage: $0 [--deb|--tar]"
     echo ""
     echo "  --deb    Build as Debian package (.deb) - silent installation"
     echo "  --tar    Build as tarball with INSTALL.sh (default)"
+    echo ""
+    echo "If no option is provided, builds tarball by default."
     exit 0
 fi
 
@@ -57,17 +63,39 @@ if [ "${BUILD_TYPE}" = "deb" ]; then
 fi
 
 # Continue with tarball build
+echo "========================================="
+echo "  Building InfraMonitor Tarball Package"
+echo "========================================="
+echo ""
 PKG_NAME="inframonitor-$(date +%Y%m%d-%H%M%S)"
 PKG_DIR="${DIST_DIR}/${PKG_NAME}"
 
 echo "[1/6] Preparing dist directory..."
 rm -rf "${PKG_DIR}"
-mkdir -p "${PKG_DIR}"
+mkdir -p "${PKG_DIR}" || {
+    echo "ERROR: Failed to create package directory" >&2
+    exit 1
+}
 
 echo "[2/6] Building React frontend..."
-pushd "${ROOT_DIR}/web-ui" >/dev/null
-npm install >/dev/null
-npm run build >/dev/null
+pushd "${ROOT_DIR}/web-ui" >/dev/null || {
+    echo "ERROR: Failed to change to web-ui directory" >&2
+    exit 1
+}
+if [ ! -d "node_modules" ]; then
+    echo "  Installing npm dependencies..."
+    npm install || {
+        echo "ERROR: npm install failed" >&2
+        popd >/dev/null
+        exit 1
+    }
+fi
+echo "  Running npm build..."
+npm run build || {
+    echo "ERROR: npm run build failed" >&2
+    popd >/dev/null
+    exit 1
+}
 popd >/dev/null
 
 echo "[3/6] Copying project assets..."
@@ -195,12 +223,30 @@ Contents:
 EOF
 
 echo "[6/6] Creating tarball..."
-mkdir -p "${DIST_DIR}"
-pushd "${DIST_DIR}" >/dev/null
-tar -czf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
+mkdir -p "${DIST_DIR}" || {
+    echo "ERROR: Failed to create dist directory" >&2
+    exit 1
+}
+pushd "${DIST_DIR}" >/dev/null || {
+    echo "ERROR: Failed to change to dist directory" >&2
+    exit 1
+}
+echo "  Compressing package..."
+tar -czf "${PKG_NAME}.tar.gz" "${PKG_NAME}" || {
+    echo "ERROR: Failed to create tarball" >&2
+    popd >/dev/null
+    exit 1
+}
 popd >/dev/null
 
 echo ""
-echo "Release created:"
-echo "  ${DIST_DIR}/${PKG_NAME}.tar.gz"
+echo "✓ Tarball package created successfully!"
+echo ""
+echo "Package: ${DIST_DIR}/${PKG_NAME}.tar.gz"
+echo ""
+echo "To install:"
+echo "  tar -xzf ${PKG_NAME}.tar.gz"
+echo "  cd ${PKG_NAME}"
+echo "  sudo ./INSTALL.sh"
+echo ""
 
