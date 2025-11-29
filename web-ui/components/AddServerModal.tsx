@@ -70,7 +70,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({ isOpen, onClose,
 
             // Clear password from memory immediately after use
             formData.password = '';
-            
+
             onAdd(newServer);
             handleClose();
         } else {

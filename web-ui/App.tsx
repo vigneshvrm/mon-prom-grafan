@@ -277,7 +277,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Failed to save server:', error);
       // Still add to local state for immediate UI feedback
-      setServers(prev => [...prev, server]);
+    setServers(prev => [...prev, server]);
       // Show error to user (you can add a toast notification here)
       alert('Failed to save server to database: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
